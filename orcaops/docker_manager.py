@@ -11,14 +11,15 @@ class BuildResult:
 
 
 import docker
+import docker.errors # Added for error handling
 import os
 from packaging.version import Version, InvalidVersion
-from typing import Optional, List
+from typing import Optional, List, Union # Union for type hinting
 
 from orcaops import logger # Assuming logger is initialized in orcaops/__init__.py
 
 class DockerManager:
-    """Manages Docker image building and interaction."""
+    """Manages Docker image building, container lifecycle, and interaction."""
 
     def __init__(self, registry_url: Optional[str] = None):
         """
@@ -221,3 +222,154 @@ class DockerManager:
             size_mb=size_in_mb,
             logs=build_logs_str,
         )
+
+    def run(self, image_name: str, **kwargs) -> str:
+        """
+        Runs a Docker container.
+
+        Args:
+            image_name: Name of the Docker image to run.
+            **kwargs: Keyword arguments for docker.client.containers.run()
+                      (e.g., detach=True, ports={'8000/tcp': 8000},
+                       volumes={'/host/path': {'bind': '/container/path', 'mode': 'rw'}},
+                       environment=["FOO=bar"]).
+
+        Returns:
+            The ID of the started container.
+
+        Raises:
+            docker.errors.ImageNotFound: If the image does not exist.
+            docker.errors.APIError: For other Docker API errors.
+        """
+        logger.info(f"Attempting to run container from image: {image_name} with options: {kwargs}")
+        try:
+            container = self.client.containers.run(image_name, **kwargs)
+            logger.info(f"Successfully started container {container.id} from image {image_name}")
+            return container.id
+        except docker.errors.ImageNotFound as e:
+            logger.error(f"Image {image_name} not found: {e}")
+            raise
+        except docker.errors.APIError as e:
+            logger.error(f"Failed to run container from image {image_name}: {e}")
+            raise
+
+    def logs(self, container_id: str, stream: bool = True, **kwargs) -> Union[str, None]:
+        """
+        Fetches logs from a container.
+
+        Args:
+            container_id: ID of the container.
+            stream: If True (default), streams logs and prints them.
+                    If False, returns all logs as a string.
+            **kwargs: Additional keyword arguments for container.logs()
+                      (e.g., tail="all", since=datetime_obj, until=datetime_obj).
+
+        Returns:
+            Log string if stream is False, None otherwise.
+
+        Raises:
+            docker.errors.NotFound: If the container is not found.
+            docker.errors.APIError: For other Docker API errors.
+        """
+        logger.info(f"Fetching logs for container {container_id} (stream: {stream})")
+        try:
+            container = self.client.containers.get(container_id)
+            if stream:
+                # Build params carefully to avoid duplicate keywords if they are also in kwargs
+                log_params = {"follow": True, "timestamps": True} # Defaults for streaming
+                log_params.update(kwargs) # User-provided kwargs can override these
+                log_params["stream"] = True # Ensure stream is True for this path
+
+                log_stream = container.logs(**log_params)
+                logger.info(f"Streaming logs for {container_id}:")
+                for log_entry in log_stream:
+                    # log_entry is bytes, decode to string
+                    logger.info(log_entry.decode('utf-8').strip())
+                return None # Streaming directly logs, does not return logs as a string
+            else:
+                all_logs = container.logs(stream=False, **kwargs)
+                decoded_logs = all_logs.decode('utf-8')
+                logger.info(f"Fetched all logs for {container_id}:\n{decoded_logs[:500]}{'...' if len(decoded_logs) > 500 else ''}") # Log a snippet
+                return decoded_logs
+        except docker.errors.NotFound:
+            logger.error(f"Container {container_id} not found when trying to fetch logs.")
+            raise
+        except docker.errors.APIError as e:
+            logger.error(f"Failed to fetch logs for container {container_id}: {e}")
+            raise
+
+    def stop(self, container_id: str, **kwargs) -> bool:
+        """
+        Stops a running container.
+
+        Args:
+            container_id: ID of the container to stop.
+            **kwargs: Additional keyword arguments for container.stop() (e.g., timeout=10).
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        logger.info(f"Attempting to stop container {container_id}")
+        try:
+            container = self.client.containers.get(container_id)
+            container.stop(**kwargs)
+            logger.info(f"Successfully stopped container {container_id}")
+            return True
+        except docker.errors.NotFound:
+            logger.warning(f"Container {container_id} not found when trying to stop. Already stopped/removed?")
+            return False
+        except docker.errors.APIError as e:
+            logger.error(f"Failed to stop container {container_id}: {e}")
+            return False
+
+    def rm(self, container_id: str, force: bool = False, **kwargs) -> bool:
+        """
+        Removes a container.
+
+        Args:
+            container_id: ID of the container to remove.
+            force: If True, force removes the container (e.g., if it's running).
+            **kwargs: Additional keyword arguments for container.remove() (e.g., v=True to remove volumes).
+
+        Returns:
+            True if successful, False otherwise.
+        """
+        logger.info(f"Attempting to remove container {container_id} (force: {force})")
+        try:
+            container = self.client.containers.get(container_id)
+            container.remove(force=force, **kwargs)
+            logger.info(f"Successfully removed container {container_id}")
+            return True
+        except docker.errors.NotFound:
+            logger.warning(f"Container {container_id} not found when trying to remove. Already removed?")
+            return False # Considered not a failure of the operation's intent
+        except docker.errors.APIError as e:
+            # This can happen if trying to remove a running container without force=True
+            logger.error(f"Failed to remove container {container_id}: {e}. Try with force=True if it is running.")
+            return False
+
+    def list_running_containers(self, **kwargs) -> List[docker.models.containers.Container]:
+        """
+        Lists running Docker containers.
+
+        Args:
+            **kwargs: Keyword arguments for docker.client.containers.list()
+                      (e.g., all=True, filters={"status": "exited"}).
+
+        Returns:
+            A list of docker.models.containers.Container objects.
+        """
+        logger.info(f"Listing running containers with options: {kwargs}")
+        try:
+            # Default to only running containers if 'all' is not in kwargs
+            if 'all' not in kwargs and 'filters' not in kwargs:
+                 kwargs.setdefault('filters', {'status': 'running'})
+
+            containers = self.client.containers.list(**kwargs)
+            logger.info(f"Found {len(containers)} containers.")
+            for i, c in enumerate(containers):
+                logger.debug(f"  {i+1}. ID: {c.short_id}, Name: {c.name}, Image: {c.attrs['Config']['Image']}, Status: {c.status}")
+            return containers
+        except docker.errors.APIError as e:
+            logger.error(f"Failed to list containers: {e}")
+            return [] # Return empty list on error

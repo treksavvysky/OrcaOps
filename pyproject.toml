@@ -21,3 +21,14 @@ test = [
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "--cov=orcaops --cov-report=term-missing --cov-report=xml"
+testpaths = [
+    "tests",
+]
+pythonpath = ["."] # Add current directory to pythonpath to help with imports if needed
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
