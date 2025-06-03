@@ -7,6 +7,9 @@ requires-python = ">=3.8"
 dependencies = [
     "docker",
     "packaging",
+    "typer>=0.16.0",
+    "requests",
+    "rich",
 ]
 
 [project.urls]
