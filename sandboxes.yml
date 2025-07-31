@@ -1,0 +1,70 @@
+sandboxes:
+  - name: "alpine_echo"
+    image: "alpine:latest"
+    command: ["echo", "Hello from Alpine Sandbox!"]
+    timeout: 30
+    cleanup_policy: "always_remove" # Clean and simple test
+    success_exit_codes: [0]
+
+  - name: "python_script_success"
+    image: "python:3.9-slim"
+    command: ["python", "-c", "import time; print('Python script started.'); time.sleep(2); print('Python script finished successfully.'); exit(0)"]
+    timeout: 60
+    cleanup_policy: "remove_on_completion"
+    ports: {"8081/tcp": 8081} # Example, not used by this command
+    volumes: {"/tmp/host_data_py_success": {"bind": "/mnt/container_data", "mode": "rw"}} # Example
+    environment: ["PYTHON_VAR=hello_python_success"]
+    success_exit_codes: [0]
+
+  - name: "python_script_custom_success_code"
+    image: "python:3.9-slim"
+    command: ["python", "-c", "import time; print('Python script with custom success code.'); time.sleep(1); print('Exiting with 42.'); exit(42)"]
+    timeout: 30
+    cleanup_policy: "remove_on_completion"
+    success_exit_codes: [0, 42] # Custom success code
+
+  - name: "service_timeout_test" # Test timeout behavior
+    image: "nginx:latest" # Nginx runs in foreground by default
+    timeout: 5 # Very short timeout to trigger it
+    cleanup_policy: "remove_on_timeout"
+    ports: {"80/tcp": 8082}
+
+  - name: "service_keep_test" # Test keep_on_completion (even if it would "fail" by normal standards)
+    image: "alpine:latest"
+    command: ["sleep", "3"] # Runs for 3s, then exits code 0
+    timeout: 10
+    cleanup_policy: "keep_on_completion" # Should be kept after it completes
+
+  - name: "failure_test_remove_always"
+    image: "alpine:latest"
+    command: ["sh", "-c", "echo 'This script will fail.'; exit 3"]
+    timeout: 20
+    cleanup_policy: "always_remove" # Should be removed despite failure
+    success_exit_codes: [0] # 3 is not in this list
+
+  - name: "failure_test_keep_on_completion" # Test failed run with keep policy
+    image: "alpine:latest"
+    command: ["sh", "-c", "echo 'This script will also fail.'; exit 127"]
+    timeout: 20
+    cleanup_policy: "keep_on_completion" # Should be kept despite failure
+    success_exit_codes: [0]
+
+  - name: "nonexistent_image_run_test"
+    image: "nonexistent/image_abc123_test:v0.0.0"
+    command: ["echo", "This should not even start."]
+    timeout: 10
+    cleanup_policy: "always_remove" # Policy for a non-starter
+
+  - name: "never_remove_test_success"
+    image: "alpine:latest"
+    command: ["echo", "This container will stay (success)."]
+    timeout: 10
+    cleanup_policy: "never_remove"
+    success_exit_codes: [0]
+
+  - name: "never_remove_test_fail"
+    image: "alpine:latest"
+    command: ["sh", "-c", "exit 1"]
+    timeout: 10
+    cleanup_policy: "never_remove" # This container will stay (failure)
+    success_exit_codes: [0]
