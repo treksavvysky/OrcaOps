@@ -35,8 +35,8 @@ def main():
         
         # Test 2: Build image
         print("\n📦 Step 2: Building test image...")
-        dockerfile_path = "/projects/OrcaOps/test_project/Dockerfile"
-        build_context = "/projects/OrcaOps/test_project"
+        dockerfile_path = "test_project/Dockerfile"
+        build_context = "test_project"
         image_name = "orcaops-test-simple"
         version = "1.0.0"
         

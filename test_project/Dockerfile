@@ -1,42 +1,29 @@
-# Advanced test Docker image - Web API with health checks
-FROM python:3.11-slim
+# Simple test Docker image - Basic web server
+FROM alpine:latest
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
+# Install Python and curl
+RUN apk add --no-cache python3 py3-pip curl
 
 # Set working directory
 WORKDIR /app
 
-# Create a non-root user
-RUN useradd --create-home --shell /bin/bash appuser
+# Create a simple Python web server
+RUN echo 'import http.server; import socketserver; import os
+PORT = 8080
+Handler = http.server.SimpleHTTPRequestHandler
+with socketserver.TCPServer(("", PORT), Handler) as httpd:
+    print(f"Server running at port {PORT}")
+    httpd.serve_forever()' > simple_server.py
 
-# Copy requirements first for better layer caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application files
-COPY app.py .
-COPY static/ ./static/
-COPY templates/ ./templates/
-
-# Create logs directory and set permissions
-RUN mkdir -p /app/logs && chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
+# Create a simple index.html
+RUN echo '<h1>OrcaOps Test Container</h1><p>Simple test successful!</p>' > index.html
 
 # Expose port
 EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD curl -f http://localhost:8080/ || exit 1
 
-# Start the application
-CMD ["python", "app.py"]
+# Start the server
+CMD ["python3", "simple_server.py"]
