@@ -6,14 +6,20 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "docker",
-    "packaging",
+    "packaging", 
     "typer>=0.16.0",
     "requests",
     "rich",
+    "pyyaml",
+    "psutil",
 ]
 
 [project.urls]
 "Homepage" = "https://example.com/orcaops" # Placeholder
+
+[project.scripts]
+orcaops = "orcaops.main_cli:app"
+orcaops-legacy = "orcaops.cli:app"
 
 [project.optional-dependencies]
 test = [
