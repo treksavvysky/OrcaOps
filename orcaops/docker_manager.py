@@ -348,6 +348,84 @@ class DockerManager:
             logger.error(f"Failed to remove container {container_id}: {e}. Try with force=True if it is running.")
             return False
 
+    def inspect(self, container_id: str) -> dict:
+        """
+        Inspects a container, returning detailed information.
+
+        Args:
+            container_id: The ID or name of the container to inspect.
+
+        Returns:
+            A dictionary containing the raw inspection data from the Docker API.
+
+        Raises:
+            docker.errors.NotFound: If the container does not exist.
+            docker.errors.APIError: For other Docker API errors.
+        """
+        logger.info(f"Inspecting container {container_id}")
+        try:
+            container = self.client.containers.get(container_id)
+            return container.attrs
+        except docker.errors.NotFound as e:
+            logger.error(f"Container '{container_id}' not found for inspect.")
+            raise e
+        except docker.errors.APIError as e:
+            logger.error(f"API error inspecting container '{container_id}': {e}")
+            raise e
+
+    def cleanup(self) -> dict:
+        """
+        Stops and removes all containers managed by Docker.
+
+        This is a destructive operation. It iterates through all containers,
+        stops them, and then removes them.
+
+        Returns:
+            A dictionary reporting which containers were stopped, which were
+            removed, and any errors that occurred.
+        """
+        logger.info("Initiating cleanup of all containers.")
+        stopped_containers = []
+        removed_containers = []
+        errors = []
+
+        try:
+            all_containers = self.list_running_containers(all=True)
+            logger.info(f"Found {len(all_containers)} containers to clean up.")
+
+            for container in all_containers:
+                try:
+                    logger.info(f"Stopping container {container.short_id} ({container.name})...")
+                    self.stop(container.id)
+                    stopped_containers.append(container.short_id)
+                except Exception as e:
+                    error_msg = f"Error stopping container {container.short_id}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+                    continue  # If we can't stop it, we probably can't remove it.
+
+                try:
+                    logger.info(f"Removing container {container.short_id} ({container.name})...")
+                    self.rm(container.id)
+                    removed_containers.append(container.short_id)
+                except Exception as e:
+                    error_msg = f"Error removing container {container.short_id}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+
+        except Exception as e:
+            error_msg = f"An unexpected error occurred during the cleanup process: {e}"
+            logger.error(error_msg, exc_info=True)
+            errors.append(error_msg)
+
+        report = {
+            "stopped_containers": stopped_containers,
+            "removed_containers": removed_containers,
+            "errors": errors,
+        }
+        logger.info(f"Cleanup finished. Report: {report}")
+        return report
+
     def list_running_containers(self, **kwargs) -> List[docker.models.containers.Container]:
         """
         Lists running Docker containers.

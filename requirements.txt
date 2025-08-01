@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+docker
+typer
+rich
+packaging
