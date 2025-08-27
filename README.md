@@ -13,6 +13,7 @@ Docker's logo is a whale; an orca is the apex whale. OrcaOps aims to give your c
 - **Advanced Container Management**: Streamlined Docker operations with intelligent automation
 - **Sandbox Orchestration**: YAML-configured containerized environments for testing and development
 - **Interactive CLI**: Rich terminal interface with progress bars, status indicators, and intuitive commands
+- **REST API Interface**: FastAPI-powered web API for programmatic container management
 - **Docker Health Monitoring**: System diagnostics and container health checks
 - **Template System**: Pre-configured sandbox templates for common development scenarios
 - **Cleanup Policies**: Intelligent container lifecycle management with configurable cleanup strategies
@@ -63,6 +64,35 @@ orcaops down
 
 # Clean up Docker resources
 orcaops cleanup
+```
+
+### FastAPI Web Server
+
+Start the REST API server for web-based container management:
+
+```bash
+# Start API server (default: http://127.0.0.1:8000)
+python run_api.py
+
+# Start with custom configuration
+python run_api.py --host 0.0.0.0 --port 3005 --reload
+
+# Or use uvicorn directly
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**API Endpoints:**
+- `GET /` - Welcome message
+- `GET /orcaops/ps` - List containers (supports `?all=true`)
+- `GET /orcaops/logs/{container_id}` - Get container logs
+- `GET /orcaops/inspect/{container_id}` - Inspect container details
+- `POST /orcaops/cleanup` - Stop and remove all containers  
+- `GET /orcaops/templates` - List available sandbox templates
+
+**Interactive Documentation:**
+- **Swagger UI**: `http://localhost:8000/docs`
+- **ReDoc**: `http://localhost:8000/redoc`
+
 ```
 
 ## 🏗️ Project Structure

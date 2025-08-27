@@ -6,12 +6,15 @@ readme = "README.md"
 requires-python = ">=3.8"
 dependencies = [
     "docker",
-    "packaging", 
+    "packaging",
     "typer>=0.16.0",
     "requests",
     "rich",
     "pyyaml",
     "psutil",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
 ]
 
 [project.urls]
@@ -25,6 +28,10 @@ orcaops-legacy = "orcaops.cli:app"
 test = [
     "pytest",
     "pytest-cov",
+]
+api = [
+    "fastapi[all]",
+    "uvicorn[standard]",
 ]
 
 [build-system]
