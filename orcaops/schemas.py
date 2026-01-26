@@ -59,3 +59,88 @@ class RunRecord(BaseModel):
     ttl_expiry: Optional[datetime] = None
     fingerprint: Optional[str] = None
     error: Optional[str] = None
+
+
+# API Response Models
+
+class Container(BaseModel):
+    """Container summary for list operations"""
+    id: str
+    names: List[str]
+    image: str
+    status: str
+
+
+class ContainerInspect(BaseModel):
+    """Detailed container inspection"""
+    id: str
+    name: str
+    image: str
+    state: Dict[str, Any]
+    network_settings: Dict[str, Any]
+
+
+class CleanupReport(BaseModel):
+    """Report from cleanup operation"""
+    stopped: List[str] = Field(default_factory=list)
+    removed: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+
+
+class Template(BaseModel):
+    """Sandbox template definition"""
+    name: str
+    description: str
+    category: str
+    services: List[str]
+
+
+class TemplateList(BaseModel):
+    """List of available templates"""
+    templates: List[Template]
+
+
+# Sandbox Registry Models
+
+class SandboxStatus(str, Enum):
+    STOPPED = "stopped"
+    RUNNING = "running"
+    UNKNOWN = "unknown"
+
+
+class Sandbox(BaseModel):
+    """Registered sandbox project"""
+    name: str
+    template: str
+    path: str
+    created_at: str
+    status: str = "stopped"
+
+
+class SandboxList(BaseModel):
+    """List of registered sandboxes"""
+    sandboxes: List[Sandbox]
+    count: int
+
+
+class SandboxValidation(BaseModel):
+    """Sandbox validation result"""
+    name: str
+    exists: bool
+    has_compose: bool
+    has_env: bool
+
+
+class SandboxActionResult(BaseModel):
+    """Result of a sandbox action (up/down)"""
+    name: str
+    action: str
+    success: bool
+    message: str
+
+
+class SandboxCreateRequest(BaseModel):
+    """Request to create a new sandbox"""
+    template: str = Field(..., description="Template name (web-dev, python-ml, api-testing)")
+    name: str = Field(..., description="Sandbox name")
+    directory: Optional[str] = Field(None, description="Output directory (defaults to ./{name})")
