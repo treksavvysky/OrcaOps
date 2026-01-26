@@ -57,6 +57,10 @@ API (FastAPI) ─┘
 
 - **`orcaops/schemas.py`** - Pydantic models defining the job system: `JobSpec`, `RunRecord`, `StepResult`, `JobStatus`, `CleanupStatus`.
 
+- **`orcaops/sandbox_registry.py`** - Tracks generated sandbox projects in `~/.orcaops/sandboxes.json`. Used by `orcaops init` and `orcaops list`.
+
+- **`orcaops/sandbox_templates_simple.py`** - Template system for scaffolding multi-service projects (web-dev, python-ml, api-testing). Generates docker-compose.yml, Makefile, README.
+
 - **`orcaops/main_cli.py`** - Primary CLI entry point using Typer. Delegates to `cli_enhanced.py` for commands.
 
 - **`orcaops/api.py`** - FastAPI router with endpoints under `/orcaops/` prefix.
@@ -77,3 +81,56 @@ API (FastAPI) ─┘
 2. `JobRunner.run_sandbox_job()` creates container, executes commands
 3. `StepResult` captures each command's output/exit code
 4. `RunRecord` persists final state with status, artifacts, cleanup status
+
+---
+
+## Product Vision
+
+**OrcaOps is the AI-native DevOps platform** - the trusted execution environment where AI agents can safely take real-world actions: running code, managing infrastructure, and orchestrating complex workflows with full observability, cost control, and human-in-the-loop when needed.
+
+### Core Thesis
+
+When a GPT, Claude, or any AI assistant needs to "do something" in the real world - run code, test an API, deploy a service - OrcaOps provides the sandboxed, observable, controllable environment to make that happen.
+
+### Target Integration Points
+
+- **MCP Server** - Claude Code integration via Model Context Protocol
+- **Custom GPT Actions** - ChatGPT integration via REST API
+- **CI/CD Pipelines** - GitHub Actions, GitLab CI integration
+- **Web Dashboard** - Visual interface for monitoring (future)
+
+### Key Differentiators
+
+1. **AI-First Design** - Structured outputs optimized for AI consumption
+2. **Observable Everything** - Rich run records, anomaly detection, searchable history
+3. **Workflow Engine** - Multi-step jobs with dependencies, parallelism, and conditions
+4. **Multi-Tenant Safe** - Proper isolation, resource limits, security policies
+5. **Self-Improving** - Learns from usage, provides intelligent recommendations
+
+---
+
+## Development Roadmap
+
+The product roadmap is documented in the `docs/` folder with detailed sprint plans:
+
+| Sprint | Focus | Duration |
+|--------|-------|----------|
+| [SPRINT-01](docs/SPRINT-01.md) | Foundation & Job Execution API | 2 weeks |
+| [SPRINT-02](docs/SPRINT-02.md) | MCP Server Integration | 2 weeks |
+| [SPRINT-03](docs/SPRINT-03.md) | Observability & Intelligent Run Records | 2 weeks |
+| [SPRINT-04](docs/SPRINT-04.md) | Workflow Engine & Job Chaining | 3 weeks |
+| [SPRINT-05](docs/SPRINT-05.md) | Multi-Tenant Workspaces & Security | 3 weeks |
+| [SPRINT-06](docs/SPRINT-06.md) | AI-Driven Optimization | 3 weeks |
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the complete roadmap overview, milestones, and timeline.
+
+### Current State
+
+- Core DockerManager and JobRunner functional
+- CLI with sandbox templates and registry
+- REST API with container and sandbox endpoints
+- Test coverage at 86 tests passing
+
+### Next Steps
+
+Begin with Sprint 01 to expose JobRunner through the REST API, enabling external clients to submit and monitor jobs programmatically
