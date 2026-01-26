@@ -115,20 +115,26 @@ def test_build_success_autoinfer_version(mock_abspath, mock_exists, docker_manag
 
 @mock.patch('os.path.exists', return_value=True)
 @mock.patch('os.path.abspath', side_effect=lambda p: p)
-@mock.patch('importlib.import_module', side_effect=ModuleNotFoundError("No module named 'package'"))
-def test_build_autoinfer_version_no_package_version(mock_import_module, mock_abspath, mock_exists, docker_manager_instance, create_dummy_dockerfile):
+def test_build_autoinfer_version_no_package_version(mock_abspath, mock_exists, docker_manager_instance, create_dummy_dockerfile):
     manager, _ = docker_manager_instance
     dockerfile_path, build_context_path = create_dummy_dockerfile
-    if 'package' in sys.modules: del sys.modules['package']
-    
-    with mock.patch.dict(sys.modules):
-        if 'package' in sys.modules: del sys.modules['package']
+
+    # Ensure 'package' is not in sys.modules so the import will fail
+    # We use mock.patch.dict to temporarily remove/prevent 'package' module
+    original_modules = sys.modules.copy()
+    if 'package' in sys.modules:
+        del sys.modules['package']
+
+    try:
         with pytest.raises(ValueError, match="Version not provided and could not determine version"):
             manager.build(
                 dockerfile_path=dockerfile_path,
                 build_context=build_context_path,
                 image_name="fail-image"
             )
+    finally:
+        # Restore sys.modules
+        sys.modules.update(original_modules)
 
 @mock.patch('os.path.exists', return_value=True)
 @mock.patch('os.path.abspath', side_effect=lambda x: x) 
