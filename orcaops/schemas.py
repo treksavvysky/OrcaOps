@@ -1,34 +1,61 @@
-from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
+from enum import Enum
+from datetime import datetime
+from pydantic import BaseModel, Field, validator
 
-class Container(BaseModel):
-    """Schema for a Docker container."""
-    id: str
-    names: List[str]
-    image: str
-    status: str
+class JobStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
 
-class ContainerInspect(BaseModel):
-    """Schema for detailed container inspection."""
-    id: str
+class CleanupStatus(str, Enum):
+    DESTROYED = "destroyed"
+    LEAKED = "leaked"
+
+class JobCommand(BaseModel):
+    command: str = Field(..., description="The command to execute")
+    cwd: Optional[str] = Field(None, description="Working directory for the command")
+    timeout_seconds: int = Field(300, description="Timeout for this specific command")
+
+class SandboxSpec(BaseModel):
+    image: str = Field(..., description="Docker image reference (should be pinned)")
+    env: Dict[str, str] = Field(default_factory=dict, description="Environment variables")
+    resources: Dict[str, Any] = Field(default_factory=dict, description="Resource limits (e.g. cpu, memory)")
+
+class JobSpec(BaseModel):
+    job_id: str = Field(..., description="Unique identifier for the job")
+    sandbox: SandboxSpec
+    commands: List[JobCommand]
+    artifacts: List[str] = Field(default_factory=list, description="List of paths/globs to collect")
+    ttl_seconds: int = Field(3600, description="Total time to live for the sandbox")
+
+class StepResult(BaseModel):
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    duration_seconds: float
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class ArtifactMetadata(BaseModel):
     name: str
-    image: str
-    state: Dict
-    network_settings: Dict
+    path: str
+    size_bytes: int
+    sha256: str
 
-class CleanupReport(BaseModel):
-    """Schema for the result of a cleanup operation."""
-    stopped_containers: List[str]
-    removed_containers: List[str]
-    errors: List[str]
-
-class Template(BaseModel):
-    """Schema for a sandbox template."""
-    name: str
-    description: str
-    category: str
-    services: Dict
-
-class TemplateList(BaseModel):
-    """Schema for a list of sandbox templates."""
-    templates: Dict[str, Template]
+class RunRecord(BaseModel):
+    job_id: str
+    status: JobStatus
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    sandbox_id: Optional[str] = None
+    image_ref: Optional[str] = None
+    steps: List[StepResult] = Field(default_factory=list)
+    artifacts: List[ArtifactMetadata] = Field(default_factory=list)
+    cleanup_status: Optional[CleanupStatus] = None
+    ttl_expiry: Optional[datetime] = None
+    fingerprint: Optional[str] = None
+    error: Optional[str] = None

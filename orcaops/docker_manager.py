@@ -13,8 +13,10 @@ class BuildResult:
 import docker
 import docker.errors # Added for error handling
 import os
+import io
+import tarfile
 from packaging.version import Version, InvalidVersion
-from typing import Optional, List, Union # Union for type hinting
+from typing import Optional, List, Union, Tuple # Union for type hinting
 
 from orcaops import logger # Assuming logger is initialized in orcaops/__init__.py
 
@@ -451,3 +453,70 @@ class DockerManager:
         except docker.errors.APIError as e:
             logger.error(f"Failed to list containers: {e}")
             return [] # Return empty list on error
+
+    def exec_command(self, container_id: str, cmd: List[str], **kwargs) -> Tuple[Optional[int], str]:
+        """
+        Executes a command inside a running container.
+
+        Args:
+            container_id: The ID of the container.
+            cmd: The command to execute as a list of strings.
+            **kwargs: Additional arguments for exec_create (e.g., workdir, env).
+
+        Returns:
+            A tuple containing (exit_code, output_string).
+        """
+        logger.info(f"Executing command '{' '.join(cmd)}' in container '{container_id}'")
+        try:
+            exec_response = self.client.api.exec_create(container_id, cmd, **kwargs)
+            exec_id = exec_response['Id']
+
+            output_generator = self.client.api.exec_start(exec_id, stream=True)
+            output_lines = []
+            for chunk in output_generator:
+                line = chunk.decode('utf-8', errors='replace').strip()
+                output_lines.append(line)
+
+            full_output = "\n".join(output_lines)
+
+            exec_inspect = self.client.api.exec_inspect(exec_id)
+            exit_code = exec_inspect.get('ExitCode')
+
+            return exit_code, full_output
+        except docker.errors.NotFound:
+            logger.error(f"Container {container_id} not found for exec.")
+            return None, "Container not found"
+        except docker.errors.APIError as e:
+            logger.error(f"API Error executing command in {container_id}: {e}")
+            return None, str(e)
+
+    def copy_from(self, container_id: str, src_path: str, dest_path: str):
+        """
+        Copies a file or directory from a container to the local filesystem.
+
+        Args:
+            container_id: The ID of the container.
+            src_path: Path to the file or directory inside the container.
+            dest_path: Local path where the content should be extracted.
+        """
+        logger.info(f"Copying '{src_path}' from container '{container_id}' to '{dest_path}'")
+        try:
+            container = self.client.containers.get(container_id)
+            bits, stat = container.get_archive(src_path)
+
+            # The bits are a tar stream. We need to write them to a file-like object and extract.
+            file_obj = io.BytesIO()
+            for chunk in bits:
+                file_obj.write(chunk)
+            file_obj.seek(0)
+
+            with tarfile.open(fileobj=file_obj) as tar:
+                tar.extractall(path=dest_path)
+
+            logger.info(f"Successfully copied artifacts to {dest_path}")
+        except docker.errors.NotFound:
+            logger.error(f"Path '{src_path}' not found in container '{container_id}'.")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to copy from container {container_id}: {e}")
+            raise
