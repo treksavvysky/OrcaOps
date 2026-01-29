@@ -16,26 +16,26 @@
 ### Tasks
 
 #### 1.1 Job Submission Endpoint
-- [ ] `POST /orcaops/jobs` - Submit a new job
+- [x] `POST /orcaops/jobs` - Submit a new job
   - Accept `JobSpec` as request body
   - Validate image references and commands
   - Return `job_id` and initial status
   - Start job execution in background task
 
 #### 1.2 Job Status Endpoint
-- [ ] `GET /orcaops/jobs/{job_id}` - Get job status and details
+- [x] `GET /orcaops/jobs/{job_id}` - Get job status and details
   - Return current `RunRecord` state
   - Include step results if available
   - Show cleanup status
 
 #### 1.3 Job Listing Endpoint
-- [ ] `GET /orcaops/jobs` - List recent jobs
+- [x] `GET /orcaops/jobs` - List recent jobs
   - Support filtering by status (queued, running, success, failed)
   - Pagination support
   - Sort by created_at descending
 
 #### 1.4 Job Cancellation
-- [ ] `POST /orcaops/jobs/{job_id}/cancel` - Cancel a running job
+- [x] `POST /orcaops/jobs/{job_id}/cancel` - Cancel a running job
   - Stop container gracefully
   - Update status to cancelled
   - Apply cleanup policy
@@ -95,12 +95,12 @@
 - [ ] Store in `~/.orcaops/artifacts/{job_id}/`
 
 #### 3.2 Artifact API
-- [ ] `GET /orcaops/jobs/{job_id}/artifacts` - List artifacts
-- [ ] `GET /orcaops/jobs/{job_id}/artifacts/{filename}` - Download artifact
-- [ ] Include size, checksum, and content-type in response
+- [x] `GET /orcaops/jobs/{job_id}/artifacts` - List artifacts
+- [x] `GET /orcaops/jobs/{job_id}/artifacts/{filename}` - Download artifact
+- [x] Include size, checksum, and content-type in response
 
 #### 3.3 Artifact Metadata
-- [ ] Store `ArtifactMetadata` in run record
+- [x] Store `ArtifactMetadata` in run record
 - [ ] Support artifact retention policies
 - [ ] Compress large artifacts (optional gzip)
 

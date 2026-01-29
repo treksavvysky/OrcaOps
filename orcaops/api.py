@@ -1,11 +1,15 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 from typing import List, Optional
+import hashlib
+import os
 import subprocess
 import docker
 
 from orcaops.docker_manager import DockerManager
 from orcaops.sandbox_templates_simple import SandboxTemplates, TemplateManager
 from orcaops.sandbox_registry import get_registry
+from orcaops.job_manager import JobManager
 from orcaops.schemas import (
     Container,
     ContainerInspect,
@@ -17,10 +21,19 @@ from orcaops.schemas import (
     SandboxValidation,
     SandboxActionResult,
     SandboxCreateRequest,
+    JobSpec,
+    JobStatus,
+    JobSubmitResponse,
+    JobStatusResponse,
+    JobListResponse,
+    JobCancelResponse,
+    JobArtifactListResponse,
+    ArtifactMetadata,
 )
 
 router = APIRouter()
 docker_manager = DockerManager()
+job_manager = JobManager()
 
 
 # Container Management Endpoints
@@ -428,3 +441,122 @@ async def cleanup_sandboxes():
         "count": len(removed),
         "message": f"Removed {len(removed)} invalid sandbox(es)."
     }
+
+
+def _build_artifact_metadata(job_id: str, filename: str) -> ArtifactMetadata:
+    job_dir = os.path.join(job_manager.output_dir, job_id)
+    path = os.path.join(job_dir, filename)
+    size = os.path.getsize(path) if os.path.exists(path) else 0
+    sha256 = "missing"
+    if os.path.isfile(path):
+        sha = hashlib.sha256()
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(8192), b""):
+                sha.update(chunk)
+        sha256 = sha.hexdigest()
+    return ArtifactMetadata(name=filename, path=filename, size_bytes=size, sha256=sha256)
+
+
+# Job Endpoints
+
+@router.post("/jobs", response_model=JobSubmitResponse, summary="Submit a new job")
+async def submit_job(job_spec: JobSpec):
+    """
+    Submit a new sandbox job.
+    """
+    if not job_spec.commands:
+        raise HTTPException(status_code=400, detail="At least one command is required.")
+
+    if any(not command.command.strip() for command in job_spec.commands):
+        raise HTTPException(status_code=400, detail="Command entries must be non-empty strings.")
+
+    try:
+        record = job_manager.submit_job(job_spec)
+    except ValueError as exc:
+        status_code = 409 if "already exists" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc))
+
+    return JobSubmitResponse(
+        job_id=record.job_id,
+        status=record.status,
+        created_at=record.created_at,
+        message="Job accepted and queued for execution.",
+    )
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatusResponse, summary="Get job status")
+async def get_job_status(job_id: str):
+    """
+    Get status and details for a job.
+    """
+    record = job_manager.get_job(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    return JobStatusResponse(job_id=record.job_id, status=record.status, record=record)
+
+
+@router.get("/jobs", response_model=JobListResponse, summary="List recent jobs")
+async def list_jobs(
+    status: Optional[JobStatus] = Query(None, description="Filter by job status"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    limit: int = Query(50, ge=1, le=200, description="Pagination limit"),
+):
+    """
+    List recent jobs, sorted by created_at descending.
+    """
+    records = job_manager.list_jobs(status=status)
+    sliced = records[offset:offset + limit]
+    return JobListResponse(jobs=sliced, count=len(records))
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=JobCancelResponse, summary="Cancel a job")
+async def cancel_job(job_id: str):
+    """
+    Cancel a running or queued job.
+    """
+    cancelled, record = job_manager.cancel_job(job_id)
+    if not cancelled or not record:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    return JobCancelResponse(
+        job_id=record.job_id,
+        status=record.status,
+        message="Cancellation requested. The job will stop as soon as possible.",
+    )
+
+
+@router.get("/jobs/{job_id}/artifacts", response_model=JobArtifactListResponse, summary="List job artifacts")
+async def list_job_artifacts(job_id: str):
+    """
+    List artifacts captured for a completed job.
+    """
+    record = job_manager.get_job(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    artifacts = record.artifacts
+    if not artifacts:
+        artifacts = [
+            _build_artifact_metadata(job_id, name)
+            for name in job_manager.list_artifacts(job_id)
+        ]
+
+    return JobArtifactListResponse(job_id=job_id, artifacts=artifacts, count=len(artifacts))
+
+
+@router.get("/jobs/{job_id}/artifacts/{filename}", summary="Download job artifact")
+async def download_job_artifact(job_id: str, filename: str):
+    """
+    Download a specific artifact by filename.
+    """
+    job_dir = os.path.join(job_manager.output_dir, job_id)
+    requested = os.path.realpath(os.path.join(job_dir, filename))
+    root = os.path.realpath(job_dir)
+    if not requested.startswith(root + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid artifact path.")
+
+    if not os.path.exists(requested):
+        raise HTTPException(status_code=404, detail="Artifact not found.")
+
+    return FileResponse(requested, filename=filename)

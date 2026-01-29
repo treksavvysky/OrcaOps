@@ -9,6 +9,7 @@ class JobStatus(str, Enum):
     SUCCESS = "success"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
 
 class CleanupStatus(str, Enum):
     DESTROYED = "destroyed"
@@ -59,6 +60,36 @@ class RunRecord(BaseModel):
     ttl_expiry: Optional[datetime] = None
     fingerprint: Optional[str] = None
     error: Optional[str] = None
+
+
+class JobSubmitResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    created_at: datetime
+    message: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    record: RunRecord
+
+
+class JobListResponse(BaseModel):
+    jobs: List[RunRecord]
+    count: int
+
+
+class JobCancelResponse(BaseModel):
+    job_id: str
+    status: JobStatus
+    message: str
+
+
+class JobArtifactListResponse(BaseModel):
+    job_id: str
+    artifacts: List[ArtifactMetadata]
+    count: int
 
 
 # API Response Models
