@@ -161,7 +161,10 @@ class CLICommands:
             """Initialize a new sandbox from template"""
             from rich.prompt import Prompt, Confirm
             from orcaops.sandbox_templates_simple import TemplateManager
-            
+            from orcaops.sandbox_registry import get_registry
+
+            registry = get_registry()
+
             # Validate template
             if not TemplateManager.validate_template_name(template):
                 console.print(f"❌ Template '{template}' not found", style="red")
@@ -169,33 +172,212 @@ class CLICommands:
                 table = TemplateManager.list_templates_table()
                 console.print(table)
                 raise typer.Exit(1)
-            
+
             # Get sandbox name
             if not name:
                 name = Prompt.ask("🏷️ Sandbox name", default=f"my-{template}")
-            
+
+            # Check if name already exists in registry
+            if registry.exists(name):
+                existing = registry.get(name)
+                console.print(f"⚠️  Sandbox '{name}' already exists at {existing.path}", style="yellow")
+                if not Confirm.ask("Create anyway with this name?"):
+                    raise typer.Exit(0)
+
             # Get output directory
             if not directory:
                 directory = Prompt.ask("📁 Output directory", default=f"./{name}")
-            
+
             output_path = Path(directory)
-            
+
             if output_path.exists() and any(output_path.iterdir()):
                 if not Confirm.ask(f"Directory '{directory}' exists and is not empty. Continue?"):
                     raise typer.Exit(0)
-            
+
             # Create template
             success = TemplateManager.create_sandbox_from_template(template, name, directory)
-            
+
             if success:
+                # Register the sandbox
+                registry.register(name, template, directory)
+
                 console.print(f"✅ Created {template} sandbox in {directory}", style="green")
-                
+
                 console.print(f"\n🚀 [bold]Next steps:[/bold]")
                 console.print(f"  1. [cyan]cd {directory}[/cyan]")
                 console.print(f"  2. [cyan]make start[/cyan] or [cyan]docker-compose up -d[/cyan]")
-                console.print(f"  3. [cyan]orcaops ps[/cyan] to see running containers")
-                console.print(f"  4. Check the [cyan]README.md[/cyan] for service URLs and details")
+                console.print(f"  3. [cyan]orcaops list[/cyan] to see your sandboxes")
+                console.print(f"  4. [cyan]orcaops ps[/cyan] to see running containers")
+                console.print(f"  5. Check the [cyan]README.md[/cyan] for service URLs and details")
             else:
+                raise typer.Exit(1)
+
+        @app.command("list", help="📋 List generated sandboxes")
+        def list_sandboxes(
+            validate: bool = typer.Option(False, "--validate", "-v", help="Validate sandbox directories exist"),
+            cleanup: bool = typer.Option(False, "--cleanup", help="Remove sandboxes with missing directories")
+        ):
+            """List all registered sandboxes"""
+            from rich.table import Table
+            from orcaops.sandbox_registry import get_registry
+
+            registry = get_registry()
+
+            # Optionally clean up invalid entries
+            if cleanup:
+                removed = registry.cleanup_invalid()
+                if removed:
+                    console.print(f"🧹 Removed {len(removed)} invalid sandbox(es): {', '.join(removed)}", style="yellow")
+
+            sandboxes = registry.list_all()
+
+            if not sandboxes:
+                console.print("📭 No sandboxes registered yet", style="yellow")
+                console.print("\n💡 Create one with: [cyan]orcaops init <template>[/cyan]")
+                console.print("   Available templates: [cyan]orcaops templates[/cyan]")
+                return
+
+            table = Table(title="📦 Registered Sandboxes", show_header=True, header_style="bold magenta")
+            table.add_column("Name", style="cyan", min_width=15)
+            table.add_column("Template", style="blue", min_width=12)
+            table.add_column("Path", style="dim")
+            table.add_column("Created", style="green")
+            if validate:
+                table.add_column("Valid", justify="center")
+
+            for sandbox in sandboxes:
+                # Parse and format created date
+                try:
+                    from datetime import datetime
+                    created = datetime.fromisoformat(sandbox.created_at)
+                    created_str = created.strftime("%Y-%m-%d %H:%M")
+                except:
+                    created_str = sandbox.created_at[:16]
+
+                row = [sandbox.name, sandbox.template, sandbox.path, created_str]
+
+                if validate:
+                    validation = registry.validate_sandbox(sandbox.name)
+                    if validation["exists"] and validation["has_compose"]:
+                        row.append("✅")
+                    elif validation["exists"]:
+                        row.append("⚠️")
+                    else:
+                        row.append("❌")
+
+                table.add_row(*row)
+
+            console.print(table)
+            console.print(f"\n💡 Use [cyan]orcaops up <name>[/cyan] to start a sandbox")
+
+        @app.command("up", help="🚀 Start a sandbox")
+        def start_sandbox(
+            name: str = typer.Argument(..., help="Sandbox name (from orcaops list)"),
+            detach: bool = typer.Option(True, "--detach/--no-detach", "-d", help="Run in background")
+        ):
+            """Start a registered sandbox"""
+            import subprocess
+            from orcaops.sandbox_registry import get_registry
+
+            registry = get_registry()
+
+            # Check if sandbox exists
+            sandbox = registry.get(name)
+            if not sandbox:
+                console.print(f"❌ Sandbox '{name}' not found", style="red")
+                console.print("\n💡 Available sandboxes:")
+                for s in registry.list_all():
+                    console.print(f"   • {s.name}")
+                if not registry.list_all():
+                    console.print("   (none - create one with [cyan]orcaops init <template>[/cyan])")
+                raise typer.Exit(1)
+
+            # Validate sandbox directory exists
+            validation = registry.validate_sandbox(name)
+            if not validation["exists"]:
+                console.print(f"❌ Sandbox directory not found: {sandbox.path}", style="red")
+                console.print("💡 Use [cyan]orcaops list --cleanup[/cyan] to remove invalid entries")
+                raise typer.Exit(1)
+
+            if not validation["has_compose"]:
+                console.print(f"⚠️  No docker-compose.yml found in {sandbox.path}", style="yellow")
+                raise typer.Exit(1)
+
+            # Start the sandbox
+            console.print(f"🚀 Starting sandbox '{name}'...", style="blue")
+
+            cmd = ["docker-compose", "up"]
+            if detach:
+                cmd.append("-d")
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=sandbox.path,
+                    capture_output=False,
+                    text=True
+                )
+
+                if result.returncode == 0:
+                    registry.update_status(name, "running")
+                    console.print(f"✅ Sandbox '{name}' started successfully!", style="green")
+                    console.print(f"\n💡 Use [cyan]orcaops ps[/cyan] to see running containers")
+                    console.print(f"💡 Use [cyan]orcaops down {name}[/cyan] to stop")
+                else:
+                    console.print(f"❌ Failed to start sandbox '{name}'", style="red")
+                    raise typer.Exit(1)
+
+            except FileNotFoundError:
+                console.print("❌ docker-compose not found. Please install Docker Compose.", style="red")
+                raise typer.Exit(1)
+
+        @app.command("down", help="🛑 Stop a sandbox")
+        def stop_sandbox(
+            name: str = typer.Argument(..., help="Sandbox name (from orcaops list)"),
+            volumes: bool = typer.Option(False, "--volumes", "-v", help="Also remove volumes")
+        ):
+            """Stop a registered sandbox"""
+            import subprocess
+            from orcaops.sandbox_registry import get_registry
+
+            registry = get_registry()
+
+            # Check if sandbox exists
+            sandbox = registry.get(name)
+            if not sandbox:
+                console.print(f"❌ Sandbox '{name}' not found", style="red")
+                raise typer.Exit(1)
+
+            # Validate sandbox directory exists
+            validation = registry.validate_sandbox(name)
+            if not validation["exists"]:
+                console.print(f"❌ Sandbox directory not found: {sandbox.path}", style="red")
+                raise typer.Exit(1)
+
+            # Stop the sandbox
+            console.print(f"🛑 Stopping sandbox '{name}'...", style="blue")
+
+            cmd = ["docker-compose", "down"]
+            if volumes:
+                cmd.append("-v")
+
+            try:
+                result = subprocess.run(
+                    cmd,
+                    cwd=sandbox.path,
+                    capture_output=False,
+                    text=True
+                )
+
+                if result.returncode == 0:
+                    registry.update_status(name, "stopped")
+                    console.print(f"✅ Sandbox '{name}' stopped successfully!", style="green")
+                else:
+                    console.print(f"❌ Failed to stop sandbox '{name}'", style="red")
+                    raise typer.Exit(1)
+
+            except FileNotFoundError:
+                console.print("❌ docker-compose not found. Please install Docker Compose.", style="red")
                 raise typer.Exit(1)
 
 # Add utility functions to CLIUtils class

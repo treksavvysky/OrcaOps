@@ -164,11 +164,18 @@ def test_cli_stop_failure(mock_dm_instance):
     assert result.exit_code == 0
     assert "Failed to stop container fail_stop_container." in result.stdout
 
-def test_cli_docker_manager_skipped_init():
-    # This relies on ORCAOPS_SKIP_DOCKER_INIT=1 being set for the test run
-    result = runner.invoke(app, ["ps"])
-    assert result.exit_code == 2 
-    assert "DockerManager not available" in result.stdout
+def test_cli_docker_manager_skipped_init(monkeypatch):
+    # This test needs to reload the cli module with ORCAOPS_SKIP_DOCKER_INIT=1 set
+    # Since the module is already imported, we need to mock docker_manager directly
+    import orcaops.cli as cli_module
+    original_dm = cli_module.docker_manager
+    try:
+        cli_module.docker_manager = None  # Simulate skipped init
+        result = runner.invoke(app, ["ps"])
+        assert result.exit_code == 2
+        assert "DockerManager not available" in result.stdout
+    finally:
+        cli_module.docker_manager = original_dm  # Restore
 
 # Removed test_cli_docker_manager_actual_init_failure as it's too complex to
 # reliably test the startup failure with import caching and env var interactions

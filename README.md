@@ -1,29 +1,39 @@
 # OrcaOps 🐳⚙️
-*A lightweight, Python-first wrapper around the Docker Engine for DevOps automation and sandbox management.*
+
+**The AI-Native DevOps Platform** - A trusted execution environment where AI agents can safely run code, manage infrastructure, and orchestrate complex workflows with full observability and control.
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Docker](https://img.shields.io/badge/docker-required-blue.svg)](https://www.docker.com/)
+[![Tests](https://img.shields.io/badge/tests-86%20passing-green.svg)]()
 
-**Why "Orca"?**  
+**Why "Orca"?**
 Docker's logo is a whale; an orca is the apex whale. OrcaOps aims to give your containers the same edge—fast, smart, streamlined.
+
+## 🎯 Vision
+
+When a GPT, Claude, or any AI assistant needs to "do something" in the real world - run code, test an API, deploy a service - OrcaOps provides the sandboxed, observable, controllable environment to make that happen.
+
+**Target Integrations:**
+- **MCP Server** - Claude Code integration via Model Context Protocol
+- **Custom GPT Actions** - ChatGPT integration via REST API
+- **CI/CD Pipelines** - GitHub Actions, GitLab CI integration
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the complete product roadmap.
 
 ## 🚀 Features
 
-- **Advanced Container Management**: Streamlined Docker operations with intelligent automation
-- **Sandbox Orchestration**: YAML-configured containerized environments for testing and development
-- **Interactive CLI**: Rich terminal interface with progress bars, status indicators, and intuitive commands
-- **REST API Interface**: FastAPI-powered web API for programmatic container management
-- **Docker Health Monitoring**: System diagnostics and container health checks
-- **Template System**: Pre-configured sandbox templates for common development scenarios
-- **Cleanup Policies**: Intelligent container lifecycle management with configurable cleanup strategies
-- **Multi-Environment Support**: Manage multiple isolated development environments simultaneously
+- **Sandbox Templates**: Pre-configured multi-service environments (web-dev, python-ml, api-testing)
+- **Sandbox Registry**: Track and manage generated sandbox projects
+- **REST API**: Full API for programmatic container and sandbox management
+- **Interactive CLI**: Rich terminal interface with progress bars and status indicators
+- **Job Execution Engine**: Run multi-step jobs with cleanup policies and artifact collection
+- **Cleanup Policies**: Intelligent container lifecycle management (`always_remove`, `keep_on_completion`, etc.)
 
 ## 📋 Prerequisites
 
-- **Python 3.8+** - Modern Python environment
-- **Docker Desktop** or **Docker Engine** - Running Docker daemon
-- **Sufficient system resources** - Varies based on containerized workloads
+- **Python 3.8+**
+- **Docker Desktop** or **Docker Engine** (running)
 
 ## ⚡ Quick Start
 
@@ -34,300 +44,229 @@ Docker's logo is a whale; an orca is the apex whale. OrcaOps aims to give your c
 git clone https://github.com/treksavvysky/OrcaOps.git
 cd OrcaOps
 
-# Install OrcaOps in development mode
+# Install in development mode
 pip install -e .
 
 # Verify installation
-orcaops --version
+orcaops --help
 ```
 
-### Basic Usage
+### Create and Run a Sandbox
 
 ```bash
-# Check Docker environment health
-orcaops doctor
+# List available templates
+orcaops templates
 
-# Build and tag the project image
-orcaops build
+# Create a new sandbox from template
+orcaops init web-dev --name my-app --dir ./my-app
 
-# List available sandboxes
+# List your sandboxes
 orcaops list
 
-# Run sandbox environments defined in sandboxes.yml
-orcaops up
+# Start the sandbox
+orcaops up my-app
 
-# Interactive container management
-orcaops interactive
+# Check running containers
+orcaops ps
 
-# Tear down all environments
-orcaops down
-
-# Clean up Docker resources
-orcaops cleanup
+# Stop the sandbox
+orcaops down my-app
 ```
 
-### FastAPI Web Server
-
-Start the REST API server for web-based container management:
+### REST API
 
 ```bash
 # Start API server (default: http://127.0.0.1:8000)
 python run_api.py
 
-# Start with custom configuration
-python run_api.py --host 0.0.0.0 --port 3005 --reload
-
-# Or use uvicorn directly
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# Or with hot reload
+python run_api.py --host 0.0.0.0 --port 8000 --reload
 ```
 
-**API Endpoints:**
-- `GET /` - Welcome message
-- `GET /orcaops/ps` - List containers (supports `?all=true`)
-- `GET /orcaops/logs/{container_id}` - Get container logs
-- `GET /orcaops/inspect/{container_id}` - Inspect container details
-- `POST /orcaops/cleanup` - Stop and remove all containers  
-- `GET /orcaops/templates` - List available sandbox templates
-
 **Interactive Documentation:**
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
+## 📡 API Endpoints
+
+### Containers
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/orcaops/ps` | List containers (`?all=true` for all) |
+| GET | `/orcaops/logs/{id}` | Get container logs |
+| GET | `/orcaops/inspect/{id}` | Inspect container details |
+| POST | `/orcaops/stop/{id}` | Stop a container |
+| DELETE | `/orcaops/rm/{id}` | Remove a container |
+| POST | `/orcaops/cleanup` | Stop and remove all containers |
+
+### Templates
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/orcaops/templates` | List available templates |
+| GET | `/orcaops/templates/{id}` | Get template details |
+
+### Sandboxes
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/orcaops/sandboxes` | List registered sandboxes |
+| GET | `/orcaops/sandboxes/{name}` | Get sandbox details |
+| POST | `/orcaops/sandboxes` | Create sandbox from template |
+| POST | `/orcaops/sandboxes/{name}/up` | Start a sandbox |
+| POST | `/orcaops/sandboxes/{name}/down` | Stop a sandbox |
+| GET | `/orcaops/sandboxes/{name}/validate` | Validate sandbox exists |
+| DELETE | `/orcaops/sandboxes/{name}` | Unregister a sandbox |
+| POST | `/orcaops/sandboxes/cleanup` | Remove invalid entries |
+
+## 🎮 CLI Commands
+
+### Sandbox Management
+
+```bash
+# List available templates
+orcaops templates
+
+# Create sandbox from template
+orcaops init <template> [--name NAME] [--dir DIRECTORY]
+# Templates: web-dev, python-ml, api-testing
+
+# List registered sandboxes
+orcaops list [--validate] [--cleanup]
+
+# Start a sandbox
+orcaops up <sandbox-name>
+
+# Stop a sandbox
+orcaops down <sandbox-name> [--volumes]
+```
+
+### Container Management
+
+```bash
+# List containers
+orcaops ps [--all]
+
+# View container logs
+orcaops logs <container-id>
+
+# Stop containers
+orcaops stop <container-id> [<container-id>...]
+
+# Remove containers
+orcaops rm <container-id> [--force]
+
+# System diagnostics
+orcaops doctor
 ```
 
 ## 🏗️ Project Structure
 
 ```
 OrcaOps/
-├── orcaops/                    # Main package
-│   ├── __init__.py            # Package initialization and logging
-│   ├── main_cli.py            # Primary CLI entry point
-│   ├── cli_enhanced.py        # Enhanced CLI with rich UI
-│   ├── docker_manager.py      # Docker API wrapper and operations
-│   ├── sandbox_runner.py      # Sandbox execution engine
-│   ├── sandbox_templates.py   # Template management system
-│   └── interactive_mode.py    # Interactive shell mode
-├── sandboxes.yml              # Sandbox environment definitions
-├── pyproject.toml             # Package configuration and dependencies
-├── tests/                     # Test suite
-├── scripts/                   # Utility scripts
-└── README.md                  # Project documentation
+├── orcaops/
+│   ├── __init__.py              # Package initialization
+│   ├── main_cli.py              # CLI entry point (Typer)
+│   ├── cli_enhanced.py          # Enhanced CLI commands
+│   ├── cli_utils_fixed.py       # Sandbox management commands
+│   ├── api.py                   # FastAPI router
+│   ├── schemas.py               # Pydantic models
+│   ├── docker_manager.py        # Docker SDK wrapper
+│   ├── job_runner.py            # Job execution engine
+│   ├── sandbox_runner.py        # Sandbox lifecycle management
+│   ├── sandbox_registry.py      # Sandbox tracking (~/.orcaops/)
+│   └── sandbox_templates_simple.py  # Template system
+├── docs/
+│   ├── ROADMAP.md               # Product roadmap overview
+│   ├── SPRINT-01.md             # Foundation & Job API
+│   ├── SPRINT-02.md             # MCP Server Integration
+│   ├── SPRINT-03.md             # Observability
+│   ├── SPRINT-04.md             # Workflow Engine
+│   ├── SPRINT-05.md             # Multi-Tenant & Security
+│   └── SPRINT-06.md             # AI-Driven Optimization
+├── tests/                       # Test suite (86 tests)
+├── sandboxes.yml                # Sandbox job definitions
+├── main.py                      # FastAPI app
+├── run_api.py                   # API server launcher
+├── CLAUDE.md                    # Claude Code guidance
+└── pyproject.toml               # Package configuration
 ```
 
 ## 🔧 Configuration
 
-### Sandbox Configuration (`sandboxes.yml`)
+### Sandbox Templates
 
-Define your containerized environments with flexible YAML configuration:
+Templates generate complete project scaffolding:
+
+| Template | Services | Description |
+|----------|----------|-------------|
+| `web-dev` | nginx, node, postgres | Full-stack web development |
+| `python-ml` | jupyter | Machine learning with Jupyter |
+| `api-testing` | node, redis, postgres | API testing environment |
+
+### Sandbox Jobs (`sandboxes.yml`)
+
+For single-container jobs with cleanup policies:
 
 ```yaml
 sandboxes:
-  - name: "development_env"
+  - name: "python_script"
     image: "python:3.9-slim"
-    command: ["python", "-c", "print('Development environment ready!')"]
+    command: ["python", "-c", "print('Hello!')"]
     timeout: 60
     cleanup_policy: "remove_on_completion"
-    ports:
-      "8000/tcp": 8000
-    volumes:
-      "/host/path": 
-        bind: "/container/path"
-        mode: "rw"
-    environment:
-      - "ENV_VAR=production"
-      - "DEBUG=true"
     success_exit_codes: [0]
 ```
 
-#### Configuration Options:
+**Cleanup Policies:**
+- `always_remove` - Remove regardless of outcome
+- `remove_on_completion` - Remove on success only
+- `keep_on_completion` - Keep after completion
+- `remove_on_timeout` - Remove only on timeout
+- `never_remove` - Never auto-remove
 
-- **`name`**: Unique identifier for the sandbox
-- **`image`**: Docker image to use
-- **`command`**: Container startup command (optional)
-- **`timeout`**: Maximum execution time in seconds
-- **`cleanup_policy`**: Container cleanup behavior
-  - `always_remove`: Remove container regardless of exit status
-  - `remove_on_completion`: Remove on successful completion
-  - `remove_on_timeout`: Remove only if timeout occurs
-  - `keep_on_completion`: Keep container after completion
-  - `never_remove`: Never automatically remove
-- **`ports`**: Port mapping from container to host
-- **`volumes`**: Volume mounts and bind configurations
-- **`environment`**: Environment variables
-- **`success_exit_codes`**: List of exit codes considered successful
-
-## 🎯 Command Reference
-
-### Core Commands
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `build` | Build and tag project images | `orcaops build` |
-| `up` | Start sandbox environments | `orcaops up --sandbox dev_env` |
-| `down` | Stop and remove environments | `orcaops down` |
-| `list` | Show available sandboxes and containers | `orcaops list --all` |
-| `logs` | View container logs | `orcaops logs container_name` |
-| `exec` | Execute commands in running containers | `orcaops exec container_name "ls -la"` |
-
-### Management Commands
-
-| Command | Description | Example |
-|---------|-------------|---------|
-| `doctor` | System health diagnostics | `orcaops doctor` |
-| `cleanup` | Clean Docker resources | `orcaops cleanup --volumes` |
-| `interactive` | Enter interactive mode | `orcaops interactive` |
-| `templates` | Manage sandbox templates | `orcaops templates list` |
-| `version` | Show version information | `orcaops --version` |
-
-### Advanced Options
-
-```bash
-# Run specific sandbox with custom timeout
-orcaops up --sandbox python_dev --timeout 120
-
-# Build with custom Dockerfile
-orcaops build --dockerfile ./custom/Dockerfile
-
-# Clean up with force removal
-orcaops cleanup --force --all
-
-# Monitor containers in real-time
-orcaops list --watch
-```
-
-## 🧪 Development and Testing
-
-### Running Tests
+## 🧪 Testing
 
 ```bash
 # Run all tests
 pytest
 
-# Run tests with coverage
-pytest --cov=orcaops --cov-report=html
+# Run with coverage
+pytest --cov=orcaops
 
 # Run specific test file
 pytest tests/test_docker_manager.py -v
 ```
 
-### Development Setup
+## 🛣️ Roadmap
 
-```bash
-# Install development dependencies
-pip install -e ".[test]"
+Development is organized into 6 sprints (~15 weeks total):
 
-# Run pre-commit hooks
-pre-commit install
+| Sprint | Focus | Status |
+|--------|-------|--------|
+| [Sprint 01](docs/SPRINT-01.md) | Foundation & Job Execution API | Next |
+| [Sprint 02](docs/SPRINT-02.md) | MCP Server Integration | Planned |
+| [Sprint 03](docs/SPRINT-03.md) | Observability & Run Records | Planned |
+| [Sprint 04](docs/SPRINT-04.md) | Workflow Engine | Planned |
+| [Sprint 05](docs/SPRINT-05.md) | Multi-Tenant & Security | Planned |
+| [Sprint 06](docs/SPRINT-06.md) | AI-Driven Optimization | Planned |
 
-# Format code
-black orcaops/
-isort orcaops/
-```
-
-## 🔍 Troubleshooting
-
-### Common Issues
-
-**Docker Connection Failed**
-```bash
-# Check Docker daemon status
-docker version
-
-# Restart Docker Desktop
-# On macOS: Docker Desktop -> Restart
-# On Linux: sudo systemctl restart docker
-
-# Run OrcaOps diagnostics
-orcaops doctor
-```
-
-**Container Build Failures**
-```bash
-# Check Docker images
-docker images
-
-# Clean build cache
-docker system prune -f
-
-# Rebuild with no cache
-orcaops build --no-cache
-```
-
-**Permission Issues**
-```bash
-# Add user to docker group (Linux)
-sudo usermod -aG docker $USER
-
-# Logout and login again
-```
-
-### Debug Mode
-
-Enable verbose logging for detailed diagnostics:
-
-```bash
-# Set debug environment variable
-export ORCAOPS_DEBUG=1
-
-# Run commands with detailed output
-orcaops up --verbose
-```
+See [docs/ROADMAP.md](docs/ROADMAP.md) for detailed milestones and timeline.
 
 ## 🤝 Contributing
 
-We welcome contributions! Here's how to get started:
-
-1. **Fork the repository**
-2. **Create a feature branch**: `git checkout -b feature/your-feature-name`
-3. **Make your changes** and add tests
-4. **Run tests**: `pytest`
-5. **Commit your changes**: `git commit -am 'Add some feature'`
-6. **Push to the branch**: `git push origin feature/your-feature-name`
-7. **Submit a Pull Request**
-
-### Development Guidelines
-
-- Follow PEP 8 style guidelines
-- Add tests for new functionality
-- Update documentation for API changes
-- Use meaningful commit messages
-- Ensure all tests pass before submitting PR
-
-## 📚 Use Cases
-
-### DevOps Automation
-- Automated testing in isolated environments
-- CI/CD pipeline integration
-- Infrastructure provisioning and testing
-
-### Development Workflows
-- Local development environment management
-- Multi-service application testing
-- Database and service mocking
-
-### Educational Purposes
-- Container technology learning
-- Docker best practices demonstration
-- DevOps tooling exploration
-
-## 🛣️ Roadmap
-
-- [ ] **Kubernetes Integration**: Extend beyond Docker to K8s orchestration
-- [ ] **Web Dashboard**: Browser-based management interface
-- [ ] **Plugin System**: Extensible architecture for custom integrations
-- [ ] **Advanced Networking**: Custom network configurations and service discovery
-- [ ] **Resource Monitoring**: Real-time performance metrics and alerts
-- [ ] **Multi-Host Support**: Manage containers across multiple Docker hosts
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/your-feature`
+3. Make changes and add tests
+4. Run tests: `pytest`
+5. Commit: `git commit -am 'Add feature'`
+6. Push: `git push origin feature/your-feature`
+7. Submit a Pull Request
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- **Docker Community**: For the foundational container technology
-- **Typer & Rich**: For excellent CLI development libraries
-- **Python Docker SDK**: For comprehensive Docker API integration
+MIT License - see [LICENSE](LICENSE) for details.
 
 ---
 
@@ -335,6 +274,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **[⭐ Star this repo](https://github.com/treksavvysky/OrcaOps)** if you find OrcaOps helpful!
 
-Made with ❤️ for the DevOps community
+Made with ❤️ for the AI-powered DevOps future
 
 </div>

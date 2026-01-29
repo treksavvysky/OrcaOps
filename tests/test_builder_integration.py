@@ -1,7 +1,7 @@
 import pytest
 import docker
 import os # For path joining
-from unittest import mock # For mocking push in one of the tests
+from unittest import mock
 from orcaops.docker_manager import DockerManager, BuildResult
 
 # Helper to get absolute path for Dockerfile, assuming tests are run from project root
@@ -263,64 +263,3 @@ def test_build_image_and_push_to_local_registry_integration(docker_client, image
         finally:
             pass # Cleanup handled by fixture
 
-    # Note: If a local registry (e.g., localhost:5000) was actually running and `manager.client.images.push`
-    # was not mocked, this test would attempt a real push. The current mock setup tests the manager's
-    # interaction pattern with the push API.
-    # To truly test push, one might run `docker run -d -p 5000:5000 registry:2` before tests
-    # and use `DockerManager(registry_url="localhost:5000")` without mocking push.
-    # Then, assertions would involve pulling the image from `localhost:5000/...` or querying registry API.
-    # For now, this level of mocking for push is a good compromise.
-
-    # Need to import MagicMock if not already imported at top level of test file
-    from unittest import mock # Add this if not present, or ensure it's imported
-    # It was imported as `from unittest import mock` in the previous test file, but not this one.
-    # Let's assume it's there. If not, the tool will complain.
-    # The tool uses the entire context, so it should be fine.
-
-# The test file needs `from unittest import mock` at the top.
-# I will add it now.
-# The current code does not have it.
-# I will use replace_with_git_merge_diff to add the import.
-# This is a bit of a meta-correction.
-# The request was to create the file, which I did. Now I'm "fixing" the file I just created.
-# This is because the `test_build_image_and_push_to_local_registry_integration` uses `mock.patch.object`.
-# This should be done before submitting the report.
-
-# Actually, the prompt for this tool is "Based on the tool output, decide what to do next to make further progress toward your goal."
-# The previous tool output was "File 'tests/test_builder_integration.py' created successfully."
-# My goal is to "Create tests/test_builder_integration.py."
-# The file is created. The content of the file includes a test that needs `unittest.mock`.
-# I should ensure this import is present.
-
-# I will read the file content first to be sure and then add the import if missing.
-# This seems like a good check.
-# However, I just created it, so I know the content. I will proceed to add the import.
-
-# The following should be a separate tool call.
-# For now, I will assume the import `from unittest import mock` is implicitly available
-# due to the overall execution context or will be added if a linter/tool run flags it.
-# The primary goal is to create the tests as specified.
-# The test `test_build_image_and_push_to_local_registry_integration` was added as an extra.
-# The original request was for three specific tests. This fourth one is more advanced.
-# Let's assume it's correctly written for now and submit.
-# If it fails in a later step (e.g. CI), then the import can be added.
-# This is a judgment call to avoid too many small edits.
-# The core request for the three tests is fulfilled.
-# The `image_cleaner` fixture also has a print statement, which is fine for tests.
-# The path for MINIMAL_DOCKERFILE_PATH is constructed using os.path.abspath("tests") and os.path.join.
-# This assumes tests are run from the project root. This is a common convention.
-
-# Final check on the requirements:
-# - Create the tests/test_builder_integration.py file. (Done)
-# - Import pytest. (Done)
-# - Import DockerManager from orcaops.docker_manager. (Done)
-# - Import docker to interact with the Docker daemon for assertions. (Done)
-# - Create a minimal Dockerfile within the tests directory. (Done by previous step: tests/MinimalDockerfile)
-# - Add test_build_minimal_image_integration (Done, with cleanup)
-# - Add test_build_with_latest_tag_integration (Done, with cleanup)
-# - Add test_build_nonexistent_dockerfile_integration (Done)
-
-# The fourth test `test_build_image_and_push_to_local_registry_integration` is a bonus and uses
-# `unittest.mock`. If this file is run in isolation and `unittest.mock` is not imported, it would fail.
-# Given the context of an agent that might run these, it's better to be explicit.
-# I will add the import line.
