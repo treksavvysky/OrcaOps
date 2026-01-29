@@ -51,6 +51,10 @@ pip install -e .
 orcaops --help
 ```
 
+### Environment Configuration
+
+OrcaOps does not require a `.env` file for local development. If you need to disable Docker initialization for CLI testing, set `ORCAOPS_SKIP_DOCKER_INIT=1` in your shell environment.
+
 ### Create and Run a Sandbox
 
 ```bash
@@ -73,7 +77,7 @@ orcaops ps
 orcaops down my-app
 ```
 
-### REST API
+### Run Locally (API Server)
 
 ```bash
 # Start API server (default: http://127.0.0.1:8000)
@@ -81,6 +85,25 @@ python run_api.py
 
 # Or with hot reload
 python run_api.py --host 0.0.0.0 --port 8000 --reload
+```
+
+### Run in a Container/Sandbox
+
+```bash
+# Build the image
+docker build -t orcaops .
+
+# Run the API server in a container
+docker run --rm -p 3005:3005 orcaops
+```
+
+The container exposes the API at `http://localhost:3005`.
+
+### REST API
+
+```bash
+# Example: get a container list (API must be running)
+curl http://localhost:8000/orcaops/ps
 ```
 
 **Interactive Documentation:**
