@@ -327,7 +327,7 @@ def inspect_container(
 def interactive_mode():
     """Start interactive mode for container management"""
     dm = init_docker_manager()
-    
+
     try:
         interactive = InteractiveMode(dm)
         interactive.start()
@@ -336,6 +336,89 @@ def interactive_mode():
     except Exception as e:
         console.print(f"❌ [red]Interactive mode error: {e}[/red]")
         logger.error(f"Interactive mode error: {e}", exc_info=True)
+
+@app.command("logs", help="📜 Fetch logs from a container")
+def logs_command(
+    container_id: str = typer.Argument(None, help="Container name or ID"),
+    no_stream: bool = typer.Option(False, "--no-stream", help="Fetch all logs at once instead of streaming"),
+    follow: bool = typer.Option(True, "--follow", "-f", help="Follow log output (if streaming)"),
+    timestamps: bool = typer.Option(True, "--timestamps", "-t", help="Show timestamps in logs"),
+    tail: Optional[int] = typer.Option(None, "--tail", "-n", help="Number of lines to show from end")
+):
+    """Fetch and display logs from a container"""
+    dm = init_docker_manager()
+
+    if not container_id:
+        container_id = typer.prompt("Please enter the container ID or name")
+        if not container_id:
+            console.print("[bold red]Container ID or name is required.[/bold red]")
+            raise typer.Exit(code=1)
+
+    try:
+        kwargs = {}
+        if timestamps:
+            kwargs["timestamps"] = True
+        if tail is not None:
+            kwargs["tail"] = tail
+
+        if no_stream:
+            log_data = dm.logs(container_id, stream=False, **kwargs)
+            if log_data:
+                console.print(log_data)
+            else:
+                console.print(f"No logs returned for container {container_id}.", style="yellow")
+        else:
+            console.print(f"📜 Streaming logs for {container_id}...", style="blue")
+            dm.logs(container_id, stream=True, follow=follow, **kwargs)
+    except docker.errors.NotFound:
+        console.print(f"[bold red]Error: Container '{container_id}' not found.[/bold red]")
+        raise typer.Exit(1)
+    except docker.errors.APIError as e:
+        console.print(f"[bold red]Error fetching logs: {e}[/bold red]")
+        raise typer.Exit(1)
+
+@app.command("rm", help="🗑️ Remove one or more containers")
+def remove_containers_command(
+    container_ids: List[str] = typer.Argument(None, help="Container IDs or names to remove"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force removal of running containers")
+):
+    """Remove one or more containers"""
+    dm = init_docker_manager()
+
+    if not container_ids:
+        ids_str = typer.prompt("Please enter container IDs or names to remove (comma-separated)")
+        if not ids_str:
+            console.print("[bold red]At least one container ID or name is required.[/bold red]")
+            raise typer.Exit(code=1)
+        container_ids = [cid.strip() for cid in ids_str.split(',')]
+
+    for cid in container_ids:
+        success = dm.rm(cid, force=force)
+        if success:
+            console.print(f"Container {cid} removed successfully.", style="green")
+        else:
+            console.print(f"Failed to remove container {cid}. See logs for details.", style="yellow")
+
+@app.command("stop", help="🛑 Stop one or more containers")
+def stop_containers_command(
+    container_ids: List[str] = typer.Argument(None, help="Container IDs or names to stop")
+):
+    """Stop one or more containers"""
+    dm = init_docker_manager()
+
+    if not container_ids:
+        ids_str = typer.prompt("Please enter container IDs or names to stop (comma-separated)")
+        if not ids_str:
+            console.print("[bold red]At least one container ID or name is required.[/bold red]")
+            raise typer.Exit(code=1)
+        container_ids = [cid.strip() for cid in ids_str.split(',')]
+
+    for cid in container_ids:
+        success = dm.stop(cid)
+        if success:
+            console.print(f"Container {cid} stopped successfully.", style="green")
+        else:
+            console.print(f"Failed to stop container {cid}. It might already be stopped.", style="yellow")
 
 if __name__ == "__main__":
     app()

@@ -4,8 +4,7 @@
 OrcaOps is an AI-native DevOps platform for running Docker-based sandboxes and multi-step jobs via a CLI (Typer) and a REST API (FastAPI). It focuses on sandbox lifecycle management, job execution with cleanup policies, and artifact collection. See `CLAUDE.md` for a deeper architectural overview and roadmap details.
 
 ## Key Entry Points
-- **CLI (primary)**: `orcaops` (Typer app in `orcaops/main_cli.py`)
-- **Legacy CLI**: `orcaops-legacy` (Typer app in `orcaops/cli.py`)
+- **CLI**: `orcaops` (Typer app in `orcaops/main_cli.py`)
 - **API**: `main.py` (FastAPI app), launched via `python run_api.py`
 
 ## Core Modules

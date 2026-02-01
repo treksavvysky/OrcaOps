@@ -44,8 +44,7 @@ API (FastAPI) ─┘
 
 ### Entry Points
 
-- **CLI**: `orcaops` command → `orcaops/main_cli.py` (delegates to `cli_enhanced.py`)
-- **Legacy CLI**: `orcaops-legacy` → `orcaops/cli.py` (deprecated, kept for compatibility)
+- **CLI**: `orcaops` command → `orcaops/main_cli.py` (delegates to `cli_enhanced.py` for commands, `cli_utils_fixed.py` for sandbox commands)
 - **API**: `main.py` creates FastAPI app with routes from `orcaops/api.py` under `/orcaops/` prefix
 - **API launcher**: `python run_api.py` (wraps uvicorn)
 - **API Docs**: `/docs` (Swagger), `/redoc`
@@ -56,7 +55,7 @@ API (FastAPI) ─┘
 
 - **`job_runner.py`** — Executes multi-step jobs inside containers. Handles job fingerprinting (SHA256), timeout via threading+queue, artifact collection, and run record persistence (JSON + JSONL files).
 
-- **`job_manager.py`** — Thread-safe job lifecycle manager. Wraps `JobRunner` with `threading.Lock` for concurrent access. Each submitted job runs in a daemon thread with a `threading.Event` for cancellation. In-memory job registry with disk fallback via `~/.orcaops/artifacts/{job_id}/run.json`.
+- **`job_manager.py`** — Thread-safe job lifecycle manager. Wraps `JobRunner` with a global lock plus per-job locks for concurrent access. Each submitted job runs in its own thread with a `threading.Event` for cancellation. In-memory job registry with automatic eviction of completed jobs and disk fallback via `~/.orcaops/artifacts/{job_id}/run.json`.
 
 - **`sandbox_runner.py`** — Loads sandbox definitions from `sandboxes.yml` into `SandboxConfig` dataclasses. Manages container lifecycle with cleanup policies.
 
@@ -64,15 +63,13 @@ API (FastAPI) ─┘
 
 - **`api.py`** — FastAPI router. Instantiates `DockerManager` and `JobManager` as module-level singletons. Endpoints for containers (`/ps`, `/run`, `/logs`, etc.), sandboxes, templates, and jobs (`/jobs/submit`, `/jobs/{id}/status`, `/jobs/{id}/cancel`).
 
-### CLI Module Situation
+### CLI Structure
 
-There are multiple CLI-related files due to incremental development:
-- `main_cli.py` — Current primary entry point
-- `cli_enhanced.py` — Active command implementations with rich output
-- `cli.py` — Legacy CLI (entry point: `orcaops-legacy`)
-- `cli_utils.py`, `cli_utils_fixed.py` — Utility functions (partially duplicated)
+- `main_cli.py` — Entry point, wires together commands from the two modules below
+- `cli_enhanced.py` — Core commands (ps, logs, rm, stop, inspect, doctor, interactive) and shared utility functions (`format_duration`, `format_size`, `get_container_status_icon`)
+- `cli_utils_fixed.py` — Sandbox commands (init, list, up, down, cleanup, templates) and `CLIUtils`/`CLICommands` classes
 
-New CLI work should go in `cli_enhanced.py`. The legacy files are technical debt to be consolidated.
+New CLI commands should go in `cli_enhanced.py`. Sandbox-related commands go in `cli_utils_fixed.py`.
 
 ### Data Flow for Job Execution
 

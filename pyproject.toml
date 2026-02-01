@@ -22,7 +22,6 @@ dependencies = [
 
 [project.scripts]
 orcaops = "orcaops.main_cli:app"
-orcaops-legacy = "orcaops.cli:app"
 
 [project.optional-dependencies]
 test = [

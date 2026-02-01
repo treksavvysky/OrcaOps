@@ -19,40 +19,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 console = Console()
 
-def get_container_status_icon(status: str) -> str:
-    """Get status icon for container"""
-    status_icons = {
-        'running': '🟢',
-        'exited': '🔴', 
-        'restarting': '🟡',
-        'paused': '🟠',
-        'created': '⚪',
-        'dead': '💀'
-    }
-    return status_icons.get(status.lower(), '❓')
-
-def format_duration(seconds: float) -> str:
-    """Format duration in human-readable format"""
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    elif seconds < 3600:
-        return f"{int(seconds // 60)}m {int(seconds % 60)}s"
-    elif seconds < 86400:
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        return f"{hours}h {minutes}m"
-    else:
-        days = int(seconds // 86400)
-        hours = int((seconds % 86400) // 3600)
-        return f"{days}d {hours}h"
-
-def format_size(bytes_size: int) -> str:
-    """Format bytes in human-readable format"""
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-        if bytes_size < 1024.0:
-            return f"{bytes_size:.1f}{unit}"
-        bytes_size /= 1024.0
-    return f"{bytes_size:.1f}PB"
+from orcaops.cli_enhanced import format_duration, format_size, get_container_status_icon
 
 class CLIUtils:
     """Utility functions for CLI operations"""
