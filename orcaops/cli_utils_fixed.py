@@ -77,7 +77,7 @@ class CLIUtils:
             result = subprocess.run(['docker', '--version'], 
                                   capture_output=True, text=True, timeout=5)
             info['docker_version'] = result.stdout.strip() if result.returncode == 0 else "Not available"
-        except:
+        except Exception:
             info['docker_version'] = "Not available"
         
         try:
@@ -85,7 +85,7 @@ class CLIUtils:
             import psutil
             usage = psutil.disk_usage('/')
             info['disk_space'] = f"{usage.free // (1024**3)} GB free of {usage.total // (1024**3)} GB"
-        except:
+        except Exception:
             info['disk_space'] = "Unknown"
         
         return info
@@ -251,7 +251,7 @@ class CLICommands:
                     from datetime import datetime
                     created = datetime.fromisoformat(sandbox.created_at)
                     created_str = created.strftime("%Y-%m-%d %H:%M")
-                except:
+                except Exception:
                     created_str = sandbox.created_at[:16]
 
                 row = [sandbox.name, sandbox.template, sandbox.path, created_str]

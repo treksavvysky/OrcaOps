@@ -1,7 +1,7 @@
 from typing import List, Dict, Optional, Any
 from enum import Enum
-from datetime import datetime
-from pydantic import BaseModel, Field, validator
+from datetime import datetime, timezone
+from pydantic import BaseModel, Field
 
 class JobStatus(str, Enum):
     QUEUED = "queued"
@@ -38,7 +38,7 @@ class StepResult(BaseModel):
     stdout: str
     stderr: str
     duration_seconds: float
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ArtifactMetadata(BaseModel):
     name: str
@@ -49,7 +49,7 @@ class ArtifactMetadata(BaseModel):
 class RunRecord(BaseModel):
     job_id: str
     status: JobStatus
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     sandbox_id: Optional[str] = None

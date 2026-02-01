@@ -2,7 +2,7 @@ import os
 import json
 import threading
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from orcaops.docker_manager import DockerManager
@@ -38,7 +38,7 @@ class JobManager:
             record = RunRecord(
                 job_id=spec.job_id,
                 status=JobStatus.QUEUED,
-                created_at=datetime.utcnow(),
+                created_at=datetime.now(timezone.utc),
                 image_ref=spec.sandbox.image,
             )
             cancel_event = threading.Event()
@@ -62,7 +62,7 @@ class JobManager:
             entry = self._jobs.get(spec.job_id)
             if entry:
                 entry.record.status = JobStatus.RUNNING
-                entry.record.started_at = datetime.utcnow()
+                entry.record.started_at = datetime.now(timezone.utc)
 
         record = self.runner.run_sandbox_job(spec)
 
@@ -113,7 +113,7 @@ class JobManager:
             entry.cancel_event.set()
             if entry.record.status in {JobStatus.QUEUED, JobStatus.RUNNING}:
                 entry.record.status = JobStatus.CANCELLED
-                entry.record.finished_at = datetime.utcnow()
+                entry.record.finished_at = datetime.now(timezone.utc)
                 entry.record.error = "Job cancelled by user."
 
             container_id = entry.record.sandbox_id

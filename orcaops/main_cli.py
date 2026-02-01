@@ -20,7 +20,7 @@ def show_version():
     try:
         import importlib.metadata
         version = importlib.metadata.version("orcaops")
-    except:
+    except Exception:
         version = "development"
     
     version_info = f"""

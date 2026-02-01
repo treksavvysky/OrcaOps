@@ -570,7 +570,7 @@ Use Ctrl+C at any time to exit.
                                 memory_usage = stats.get('memory_stats', {}).get('usage', 0)
                                 memory_str = self.format_size(memory_usage)
                                 cpu_str = "~" # Simplified for demo
-                            except:
+                            except Exception:
                                 memory_str = "N/A"
                                 cpu_str = "N/A"
                         else:

@@ -30,11 +30,11 @@ python run_api.py
 python run_api.py --host 0.0.0.0 --port 8000 --reload
 ```
 
+No linter or formatter is configured. No CI/CD pipeline exists yet.
+
 ## Architecture Overview
 
-OrcaOps is a Python-based Docker container management system with dual interfaces (CLI and REST API).
-
-### Layer Structure
+OrcaOps is a Docker container management system with dual interfaces (CLI and REST API) sharing common core modules.
 
 ```
 CLI (Typer)  ──┐
@@ -42,95 +42,79 @@ CLI (Typer)  ──┐
 API (FastAPI) ─┘
 ```
 
-### Key Modules
-
-- **`orcaops/docker_manager.py`** - Core Docker SDK wrapper. Provides `DockerManager` class with methods for build, run, list, logs, exec, cleanup operations.
-
-- **`orcaops/job_runner.py`** - MVP sandbox job execution engine. Implements the golden path for running multi-step jobs in containers with:
-  - Job fingerprinting (SHA256 deterministic hash)
-  - Timeout handling via threading + queue pattern
-  - Artifact collection from containers
-  - Run record persistence (JSON + JSONL)
-  - Leak detection and cleanup
-
-- **`orcaops/sandbox_runner.py`** - Loads sandbox configs from `sandboxes.yml` into `SandboxConfig` dataclasses and manages container lifecycle with cleanup policies.
-
-- **`orcaops/schemas.py`** - Pydantic models defining the job system: `JobSpec`, `RunRecord`, `StepResult`, `JobStatus`, `CleanupStatus`.
-
-- **`orcaops/sandbox_registry.py`** - Tracks generated sandbox projects in `~/.orcaops/sandboxes.json`. Used by `orcaops init` and `orcaops list`.
-
-- **`orcaops/sandbox_templates_simple.py`** - Template system for scaffolding multi-service projects (web-dev, python-ml, api-testing). Generates docker-compose.yml, Makefile, README.
-
-- **`orcaops/main_cli.py`** - Primary CLI entry point using Typer. Delegates to `cli_enhanced.py` for commands.
-
-- **`orcaops/api.py`** - FastAPI router with endpoints under `/orcaops/` prefix.
-
 ### Entry Points
 
-- **CLI**: `orcaops` command (defined in pyproject.toml as `orcaops.main_cli:app`)
-- **API**: `main.py` creates FastAPI app, `run_api.py` is the server launcher
+- **CLI**: `orcaops` command → `orcaops/main_cli.py` (delegates to `cli_enhanced.py`)
+- **Legacy CLI**: `orcaops-legacy` → `orcaops/cli.py` (deprecated, kept for compatibility)
+- **API**: `main.py` creates FastAPI app with routes from `orcaops/api.py` under `/orcaops/` prefix
+- **API launcher**: `python run_api.py` (wraps uvicorn)
 - **API Docs**: `/docs` (Swagger), `/redoc`
 
-### Configuration
+### Core Modules
 
-- **`sandboxes.yml`** - YAML-based sandbox definitions with cleanup policies: `always_remove`, `remove_on_completion`, `keep_on_completion`, `remove_on_timeout`, `never_remove`
+- **`docker_manager.py`** — Docker SDK wrapper (`DockerManager` class). All container operations (build, run, list, logs, exec, cleanup) go through this.
+
+- **`job_runner.py`** — Executes multi-step jobs inside containers. Handles job fingerprinting (SHA256), timeout via threading+queue, artifact collection, and run record persistence (JSON + JSONL files).
+
+- **`job_manager.py`** — Thread-safe job lifecycle manager. Wraps `JobRunner` with `threading.Lock` for concurrent access. Each submitted job runs in a daemon thread with a `threading.Event` for cancellation. In-memory job registry with disk fallback via `~/.orcaops/artifacts/{job_id}/run.json`.
+
+- **`sandbox_runner.py`** — Loads sandbox definitions from `sandboxes.yml` into `SandboxConfig` dataclasses. Manages container lifecycle with cleanup policies.
+
+- **`schemas.py`** — All Pydantic models. Core chain: `JobSpec` → `StepResult` → `RunRecord`. Also defines API request/response models and enums (`JobStatus`, `CleanupStatus`, `SandboxStatus`).
+
+- **`api.py`** — FastAPI router. Instantiates `DockerManager` and `JobManager` as module-level singletons. Endpoints for containers (`/ps`, `/run`, `/logs`, etc.), sandboxes, templates, and jobs (`/jobs/submit`, `/jobs/{id}/status`, `/jobs/{id}/cancel`).
+
+### CLI Module Situation
+
+There are multiple CLI-related files due to incremental development:
+- `main_cli.py` — Current primary entry point
+- `cli_enhanced.py` — Active command implementations with rich output
+- `cli.py` — Legacy CLI (entry point: `orcaops-legacy`)
+- `cli_utils.py`, `cli_utils_fixed.py` — Utility functions (partially duplicated)
+
+New CLI work should go in `cli_enhanced.py`. The legacy files are technical debt to be consolidated.
 
 ### Data Flow for Job Execution
 
-1. `JobSpec` (Pydantic model) defines job parameters
-2. `JobRunner.run_sandbox_job()` creates container, executes commands
-3. `StepResult` captures each command's output/exit code
-4. `RunRecord` persists final state with status, artifacts, cleanup status
+1. `JobSpec` (Pydantic) defines job: image, commands, artifacts, TTL
+2. `JobManager.submit_job()` creates a daemon thread, stores `JobEntry` in memory
+3. Thread calls `JobRunner.run_sandbox_job()` which creates container, runs commands sequentially
+4. Each command produces a `StepResult` (exit code, stdout, stderr, duration)
+5. On first failure, execution stops (fail-fast)
+6. `RunRecord` persists to `~/.orcaops/artifacts/{job_id}/run.json` with final status, artifacts, cleanup status
 
----
+### Persistence
 
-## Product Vision
+- **Run records**: `~/.orcaops/artifacts/{job_id}/run.json` (full record) + `steps.jsonl` (streaming)
+- **Sandbox registry**: `~/.orcaops/sandboxes.json` (tracks scaffolded projects)
+- **Sandbox definitions**: `sandboxes.yml` at project root
 
-**OrcaOps is the AI-native DevOps platform** - the trusted execution environment where AI agents can safely take real-world actions: running code, managing infrastructure, and orchestrating complex workflows with full observability, cost control, and human-in-the-loop when needed.
+### Cleanup Policies (sandboxes.yml)
 
-### Core Thesis
+Containers created from sandbox definitions follow one of these policies:
+- `always_remove` — Remove regardless of outcome
+- `remove_on_completion` — Remove only on success
+- `keep_on_completion` — Keep after successful completion
+- `remove_on_timeout` — Remove only when timed out
+- `never_remove` — Never auto-remove
 
-When a GPT, Claude, or any AI assistant needs to "do something" in the real world - run code, test an API, deploy a service - OrcaOps provides the sandboxed, observable, controllable environment to make that happen.
+### Environment Variables
 
-### Target Integration Points
+- `ORCAOPS_SKIP_DOCKER_INIT=1` — Skip Docker daemon initialization (useful for CLI testing without Docker)
+- Docker daemon must be running for all container-related operations
 
-- **MCP Server** - Claude Code integration via Model Context Protocol
-- **Custom GPT Actions** - ChatGPT integration via REST API
-- **CI/CD Pipelines** - GitHub Actions, GitLab CI integration
-- **Web Dashboard** - Visual interface for monitoring (future)
+## Testing Patterns
 
-### Key Differentiators
+Tests use `unittest.mock.patch` extensively to mock Docker SDK calls. No real Docker daemon is needed for most tests. Test files:
 
-1. **AI-First Design** - Structured outputs optimized for AI consumption
-2. **Observable Everything** - Rich run records, anomaly detection, searchable history
-3. **Workflow Engine** - Multi-step jobs with dependencies, parallelism, and conditions
-4. **Multi-Tenant Safe** - Proper isolation, resource limits, security policies
-5. **Self-Improving** - Learns from usage, provides intelligent recommendations
+- `test_docker_manager.py` — DockerManager unit tests (container lifecycle, builds, errors)
+- `test_sandbox_runner.py` — SandboxRunner integration tests (YAML loading, cleanup policies, timeouts)
+- `test_golden_path.py` — JobRunner end-to-end tests (success, failure, timeout, artifact collection)
+- `test_cli.py` — CLI integration tests
+- `test_builder_integration.py` — Docker image build tests
 
----
+Coverage is configured in `pyproject.toml` via pytest addopts: `--cov=orcaops --cov-report=term-missing`.
 
-## Development Roadmap
+## Product Context
 
-The product roadmap is documented in the `docs/` folder with detailed sprint plans:
-
-| Sprint | Focus | Duration |
-|--------|-------|----------|
-| [SPRINT-01](docs/SPRINT-01.md) | Foundation & Job Execution API | 2 weeks |
-| [SPRINT-02](docs/SPRINT-02.md) | MCP Server Integration | 2 weeks |
-| [SPRINT-03](docs/SPRINT-03.md) | Observability & Intelligent Run Records | 2 weeks |
-| [SPRINT-04](docs/SPRINT-04.md) | Workflow Engine & Job Chaining | 3 weeks |
-| [SPRINT-05](docs/SPRINT-05.md) | Multi-Tenant Workspaces & Security | 3 weeks |
-| [SPRINT-06](docs/SPRINT-06.md) | AI-Driven Optimization | 3 weeks |
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the complete roadmap overview, milestones, and timeline.
-
-### Current State
-
-- Core DockerManager and JobRunner functional
-- CLI with sandbox templates and registry
-- REST API with container and sandbox endpoints
-- Test coverage at 86 tests passing
-
-### Next Steps
-
-Begin with Sprint 01 to expose JobRunner through the REST API, enabling external clients to submit and monitor jobs programmatically
+OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Current focus is Sprint 01: exposing JobRunner through the REST API.
