@@ -61,9 +61,18 @@ from orcaops.schemas import (
     SessionStatus,
     SessionResponse,
     SessionListResponse,
+    BaselineListResponse,
+    BaselineResponse,
+    AnomalyRecord,
+    AnomalyType,
+    AnomalySeverity,
+    AnomalyListResponse,
+    RecommendationType,
+    RecommendationListResponse,
+    PredictionResponse,
 )
 from orcaops.log_analyzer import SummaryGenerator
-from orcaops.metrics import MetricsAggregator
+from orcaops.metrics import MetricsAggregator, BaselineTracker
 from orcaops.workflow_manager import WorkflowManager
 from orcaops.workflow_store import WorkflowStore
 from orcaops.workflow_schema import WorkflowValidationError
@@ -82,6 +91,24 @@ workspace_registry = WorkspaceRegistry()
 key_manager = KeyManager()
 set_key_manager(key_manager)
 session_manager = SessionManager()
+baseline_tracker = BaselineTracker()
+
+from orcaops.anomaly_detector import AnomalyStore
+anomaly_store = AnomalyStore()
+
+from orcaops.recommendation_engine import RecommendationEngine, RecommendationStore
+recommendation_engine = RecommendationEngine(run_store, baseline_tracker)
+recommendation_store = RecommendationStore()
+
+from orcaops.predictor import DurationPredictor, FailurePredictor
+duration_predictor = DurationPredictor(baseline_tracker)
+failure_predictor = FailurePredictor(baseline_tracker)
+
+from orcaops.auto_optimizer import AutoOptimizer
+auto_optimizer = AutoOptimizer(baseline_tracker)
+
+from orcaops.knowledge_base import FailureKnowledgeBase
+knowledge_base = FailureKnowledgeBase()
 
 
 # Container Management Endpoints
@@ -1068,3 +1095,149 @@ async def end_session(session_id: str):
     if session is None:
         raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
     return SessionResponse(session=session, message="Session ended.")
+
+
+# --- Baseline Endpoints ---
+
+@router.get("/baselines", response_model=BaselineListResponse, summary="List performance baselines")
+async def list_baselines():
+    """List all performance baselines with statistical measures."""
+    baselines = baseline_tracker.list_baselines()
+    return BaselineListResponse(baselines=baselines, count=len(baselines))
+
+
+@router.get("/baselines/{key:path}", response_model=BaselineResponse, summary="Get a specific baseline")
+async def get_baseline(key: str):
+    """Get a specific performance baseline by key."""
+    b = baseline_tracker.get_baseline_by_key(key)
+    if b is None:
+        raise HTTPException(status_code=404, detail=f"Baseline '{key}' not found.")
+    return BaselineResponse(baseline=b)
+
+
+@router.delete("/baselines/{key:path}", summary="Delete a baseline")
+async def delete_baseline(key: str):
+    """Delete/reset a specific performance baseline."""
+    if not baseline_tracker.delete_baseline(key):
+        raise HTTPException(status_code=404, detail=f"Baseline '{key}' not found.")
+    return {"message": f"Baseline '{key}' deleted."}
+
+
+# --- Anomaly Endpoints ---
+
+@router.get("/anomalies", response_model=AnomalyListResponse, summary="List detected anomalies")
+async def list_anomalies(
+    anomaly_type: Optional[str] = Query(None, description="Filter by type"),
+    severity: Optional[str] = Query(None, description="Filter by severity"),
+    job_id: Optional[str] = Query(None, description="Filter by job ID"),
+    acknowledged: Optional[bool] = Query(None, description="Filter by acknowledged status"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List detected performance anomalies."""
+    at = None
+    if anomaly_type:
+        try:
+            at = AnomalyType(anomaly_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid anomaly type: {anomaly_type}")
+    sev = None
+    if severity:
+        try:
+            sev = AnomalySeverity(severity)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid severity: {severity}")
+
+    anomalies, total = anomaly_store.query(
+        anomaly_type=at, severity=sev, job_id=job_id,
+        acknowledged=acknowledged, limit=limit, offset=offset,
+    )
+    return AnomalyListResponse(anomalies=anomalies, total=total, offset=offset, limit=limit)
+
+
+@router.post("/anomalies/{anomaly_id}/acknowledge", summary="Acknowledge an anomaly")
+async def acknowledge_anomaly(anomaly_id: str):
+    """Mark an anomaly as acknowledged."""
+    if not anomaly_store.acknowledge(anomaly_id):
+        raise HTTPException(status_code=404, detail=f"Anomaly '{anomaly_id}' not found.")
+    return {"message": f"Anomaly '{anomaly_id}' acknowledged."}
+
+
+# --- Recommendation Endpoints ---
+
+@router.get("/recommendations", response_model=RecommendationListResponse, summary="List recommendations")
+async def list_recommendations(
+    rec_type: Optional[str] = Query(None, description="Filter by type"),
+):
+    """List stored recommendations."""
+    rt = None
+    if rec_type:
+        try:
+            rt = RecommendationType(rec_type)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid recommendation type: {rec_type}")
+    recs = recommendation_store.list_recommendations(rec_type=rt)
+    return RecommendationListResponse(recommendations=recs, count=len(recs))
+
+
+@router.post("/recommendations/generate", response_model=RecommendationListResponse, summary="Generate recommendations")
+async def generate_recommendations(
+    workspace_id: Optional[str] = Query(None, description="Workspace ID"),
+):
+    """Generate fresh recommendations from job history and baselines."""
+    recs = recommendation_engine.generate_recommendations(workspace_id=workspace_id)
+    for rec in recs:
+        recommendation_store.save(rec)
+    return RecommendationListResponse(recommendations=recs, count=len(recs))
+
+
+@router.post("/recommendations/{recommendation_id}/dismiss", summary="Dismiss a recommendation")
+async def dismiss_recommendation(recommendation_id: str):
+    """Dismiss a recommendation."""
+    if not recommendation_store.dismiss(recommendation_id):
+        raise HTTPException(status_code=404, detail=f"Recommendation '{recommendation_id}' not found.")
+    return {"message": f"Recommendation '{recommendation_id}' dismissed."}
+
+
+@router.post("/recommendations/{recommendation_id}/apply", summary="Mark recommendation as applied")
+async def apply_recommendation(recommendation_id: str):
+    """Mark a recommendation as applied."""
+    if not recommendation_store.mark_applied(recommendation_id):
+        raise HTTPException(status_code=404, detail=f"Recommendation '{recommendation_id}' not found.")
+    return {"message": f"Recommendation '{recommendation_id}' marked as applied."}
+
+
+# --- Prediction Endpoints ---
+
+@router.post("/predict", response_model=PredictionResponse, summary="Predict job duration and failure risk")
+async def predict_job(spec: JobSpec):
+    """Predict duration and failure risk for a job specification."""
+    duration = duration_predictor.predict(spec)
+    risk = failure_predictor.assess_risk(spec)
+    return PredictionResponse(duration=duration, failure_risk=risk)
+
+
+# --- Optimization & Debug Endpoints ---
+
+@router.post("/optimize", summary="Get optimization suggestions for a job")
+async def optimize_job(spec: JobSpec):
+    """Suggest timeout/memory optimizations based on historical baselines."""
+    suggestions = auto_optimizer.suggest_optimizations(spec)
+    return {"suggestions": [json_module.loads(s.model_dump_json()) for s in suggestions], "count": len(suggestions)}
+
+
+@router.post("/debug/{job_id}", summary="Debug a failed job")
+async def debug_job(job_id: str):
+    """Analyze a failed job to identify causes and suggest fixes."""
+    record = run_store.get_run(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+    analysis = knowledge_base.analyze_failure(record, run_store=run_store)
+    return json_module.loads(analysis.model_dump_json())
+
+
+@router.get("/knowledge-base/patterns", summary="List failure patterns")
+async def list_failure_patterns(category: Optional[str] = Query(None)):
+    """List known failure patterns."""
+    patterns = knowledge_base.list_patterns(category=category)
+    return {"patterns": [json_module.loads(p.model_dump_json()) for p in patterns], "count": len(patterns)}

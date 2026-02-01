@@ -44,9 +44,8 @@ class TestBaselineFirstRun:
             assert anomaly is None
             baselines = tracker.list_baselines()
             assert len(baselines) == 1
-            key = list(baselines.keys())[0]
-            assert baselines[key]["ema_duration"] == 10.0
-            assert baselines[key]["count"] == 1
+            assert baselines[0].duration_ema == 10.0
+            assert baselines[0].sample_count == 1
 
 
 class TestBaselineEMA:
@@ -60,9 +59,10 @@ class TestBaselineEMA:
             # Second run: EMA = 0.2 * 20 + 0.8 * 10 = 12.0
             tracker.update(_record(job_id="r2", duration_secs=20.0))
 
-            key = list(tracker.list_baselines().keys())[0]
-            assert tracker.list_baselines()[key]["ema_duration"] == 12.0
-            assert tracker.list_baselines()[key]["count"] == 2
+            baselines = tracker.list_baselines()
+            assert len(baselines) == 1
+            assert baselines[0].duration_ema == 12.0
+            assert baselines[0].sample_count == 2
 
 
 class TestAnomalyDetection:
@@ -138,9 +138,9 @@ class TestBaselinePersistence:
 
             # New tracker instance reads from same file
             tracker2 = BaselineTracker(baselines_path=path)
-            assert len(tracker2.list_baselines()) == 1
-            key = list(tracker2.list_baselines().keys())[0]
-            assert tracker2.list_baselines()[key]["ema_duration"] == 10.0
+            baselines = tracker2.list_baselines()
+            assert len(baselines) == 1
+            assert baselines[0].duration_ema == 10.0
 
 
 class TestBaselineKeyGeneration:

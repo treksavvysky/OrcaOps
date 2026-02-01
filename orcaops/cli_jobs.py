@@ -19,6 +19,7 @@ from rich.panel import Panel
 
 from orcaops.job_manager import JobManager
 from orcaops.run_store import RunStore
+from orcaops.metrics import BaselineTracker
 from orcaops.schemas import (
     JobSpec, SandboxSpec, JobCommand, JobStatus, RunRecord,
 )
@@ -27,6 +28,7 @@ console = Console()
 
 _job_manager: Optional[JobManager] = None
 _run_store: Optional[RunStore] = None
+_baseline_tracker: Optional[BaselineTracker] = None
 
 
 def _get_job_manager() -> JobManager:
@@ -41,6 +43,13 @@ def _get_run_store() -> RunStore:
     if _run_store is None:
         _run_store = RunStore()
     return _run_store
+
+
+def _get_baseline_tracker() -> BaselineTracker:
+    global _baseline_tracker
+    if _baseline_tracker is None:
+        _baseline_tracker = BaselineTracker()
+    return _baseline_tracker
 
 
 _STATUS_COLORS = {
@@ -512,3 +521,64 @@ def _display_job_detail(record: RunRecord):
         console.print(f"\n[bold]Artifacts:[/bold] {len(record.artifacts)}")
         for a in record.artifacts:
             console.print(f"  {a.name} ({_format_size(a.size_bytes)})")
+
+
+class BaselineCLI:
+    """Baseline management CLI commands."""
+
+    @staticmethod
+    def add_commands(app: typer.Typer):
+
+        @app.command("baselines", help="Show performance baselines")
+        def baselines_command(
+            key: Optional[str] = typer.Option(None, "--key", "-k", help="Filter by key substring"),
+        ):
+            """Display performance baselines."""
+            bt = _get_baseline_tracker()
+            baselines = bt.list_baselines()
+
+            if key:
+                baselines = [b for b in baselines if key in b.key]
+
+            if not baselines:
+                console.print("[dim]No baselines found.[/dim]")
+                return
+
+            table = Table(title="Performance Baselines", show_header=True, header_style="bold magenta")
+            table.add_column("Key", style="cyan", max_width=50)
+            table.add_column("Samples", justify="right")
+            table.add_column("EMA", justify="right")
+            table.add_column("p50", justify="right")
+            table.add_column("p95", justify="right")
+            table.add_column("Stddev", justify="right")
+            table.add_column("Success%", justify="right")
+            table.add_column("Memory Max", justify="right")
+
+            for b in baselines:
+                success_pct = f"{b.success_rate * 100:.0f}%"
+                success_color = "green" if b.success_rate >= 0.9 else "yellow" if b.success_rate >= 0.7 else "red"
+                mem = f"{b.memory_max_mb:.0f}MB" if b.memory_max_mb > 0 else "-"
+                table.add_row(
+                    b.key[:50],
+                    str(b.sample_count),
+                    f"{b.duration_ema:.1f}s",
+                    f"{b.duration_p50:.1f}s",
+                    f"{b.duration_p95:.1f}s",
+                    f"{b.duration_stddev:.1f}s",
+                    f"[{success_color}]{success_pct}[/{success_color}]",
+                    mem,
+                )
+
+            console.print(table)
+
+        @app.command("baselines-reset", help="Reset a performance baseline")
+        def baselines_reset(
+            key: str = typer.Argument(..., help="Baseline key to delete"),
+        ):
+            """Delete a specific performance baseline."""
+            bt = _get_baseline_tracker()
+            if bt.delete_baseline(key):
+                console.print(f"[green]Baseline '{key}' deleted.[/green]")
+            else:
+                console.print(f"[red]Baseline '{key}' not found.[/red]")
+                raise typer.Exit(1)

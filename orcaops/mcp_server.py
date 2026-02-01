@@ -1545,6 +1545,354 @@ def orcaops_end_session(session_id: str) -> str:
 
 
 # ===================================================================
+# Baseline Tools
+# ===================================================================
+
+_bt = None
+
+
+def _baseline_tracker():
+    global _bt
+    if _bt is None:
+        from orcaops.metrics import BaselineTracker
+        _bt = BaselineTracker()
+    return _bt
+
+
+@server.tool(
+    name="orcaops_list_baselines",
+    description="List performance baselines with statistics (EMA duration, percentiles, memory, success rate).",
+)
+def orcaops_list_baselines() -> str:
+    """List all performance baselines."""
+    try:
+        bt = _baseline_tracker()
+        baselines = bt.list_baselines()
+        return _success(
+            baselines=[json.loads(b.model_dump_json()) for b in baselines],
+            count=len(baselines),
+        )
+    except Exception as exc:
+        return _error("LIST_BASELINES_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_get_baseline",
+    description="Get a specific performance baseline by key (format: 'image::cmd1|cmd2').",
+)
+def orcaops_get_baseline(key: str) -> str:
+    """Get a specific baseline."""
+    try:
+        bt = _baseline_tracker()
+        b = bt.get_baseline_by_key(key)
+        if b is None:
+            return _error("NOT_FOUND", f"Baseline '{key}' not found.",
+                          "Use orcaops_list_baselines to see available keys.")
+        return _success(**json.loads(b.model_dump_json()))
+    except Exception as exc:
+        return _error("GET_BASELINE_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_delete_baseline",
+    description="Delete/reset a performance baseline by key.",
+)
+def orcaops_delete_baseline(key: str) -> str:
+    """Delete a baseline."""
+    try:
+        bt = _baseline_tracker()
+        if bt.delete_baseline(key):
+            return _success(key=key, message=f"Baseline '{key}' deleted.")
+        return _error("NOT_FOUND", f"Baseline '{key}' not found.")
+    except Exception as exc:
+        return _error("DELETE_BASELINE_ERROR", str(exc))
+
+
+# ===================================================================
+# Optimization & Debug Tools
+# ===================================================================
+
+_ao = None
+_kb = None
+
+
+def _auto_optimizer():
+    global _ao
+    if _ao is None:
+        from orcaops.auto_optimizer import AutoOptimizer
+        _ao = AutoOptimizer(_baseline_tracker())
+    return _ao
+
+
+def _knowledge_base():
+    global _kb
+    if _kb is None:
+        from orcaops.knowledge_base import FailureKnowledgeBase
+        _kb = FailureKnowledgeBase()
+    return _kb
+
+
+@server.tool(
+    name="orcaops_optimize_job",
+    description="Get optimization suggestions (timeout, memory) for a job based on historical baselines.",
+)
+def orcaops_optimize_job(
+    image: str,
+    commands: str,
+    timeout: int = 3600,
+) -> str:
+    """Get optimization suggestions. Commands is pipe-separated."""
+    try:
+        from orcaops.schemas import JobSpec, SandboxSpec, JobCommand
+        cmd_list = [c.strip() for c in commands.split("|") if c.strip()]
+        spec = JobSpec(
+            job_id=f"optimize_{uuid.uuid4().hex[:8]}",
+            sandbox=SandboxSpec(image=image),
+            commands=[JobCommand(command=c) for c in cmd_list],
+            ttl_seconds=timeout,
+        )
+        ao = _auto_optimizer()
+        suggestions = ao.suggest_optimizations(spec)
+        return _success(
+            suggestions=[json.loads(s.model_dump_json()) for s in suggestions],
+            count=len(suggestions),
+        )
+    except Exception as exc:
+        return _error("OPTIMIZE_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_debug_job",
+    description="Debug a failed job: identify failure patterns, suggest fixes, find similar failures.",
+)
+def orcaops_debug_job(job_id: str) -> str:
+    """Debug a failed job."""
+    try:
+        rs = _run_store()
+        record = rs.get_run(job_id)
+        if not record:
+            return _error("NOT_FOUND", f"Job '{job_id}' not found.")
+        kb = _knowledge_base()
+        analysis = kb.analyze_failure(record, run_store=rs)
+        return _success(**json.loads(analysis.model_dump_json()))
+    except Exception as exc:
+        return _error("DEBUG_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_list_failure_patterns",
+    description="List known failure patterns from the knowledge base.",
+)
+def orcaops_list_failure_patterns(category: str = "") -> str:
+    """List failure patterns."""
+    try:
+        kb = _knowledge_base()
+        cat = category or None
+        patterns = kb.list_patterns(category=cat)
+        return _success(
+            patterns=[json.loads(p.model_dump_json()) for p in patterns],
+            count=len(patterns),
+        )
+    except Exception as exc:
+        return _error("LIST_PATTERNS_ERROR", str(exc))
+
+
+# ===================================================================
+# Prediction Tools
+# ===================================================================
+
+_dp = None
+_fp = None
+
+
+def _duration_predictor():
+    global _dp
+    if _dp is None:
+        from orcaops.predictor import DurationPredictor
+        _dp = DurationPredictor(_baseline_tracker())
+    return _dp
+
+
+def _failure_predictor():
+    global _fp
+    if _fp is None:
+        from orcaops.predictor import FailurePredictor
+        _fp = FailurePredictor(_baseline_tracker())
+    return _fp
+
+
+@server.tool(
+    name="orcaops_predict_job",
+    description="Predict duration and failure risk for a job based on historical baselines.",
+)
+def orcaops_predict_job(
+    image: str,
+    commands: str,
+    timeout: int = 3600,
+) -> str:
+    """Predict duration and failure risk. Commands is a pipe-separated string (e.g. 'pytest|flake8')."""
+    try:
+        from orcaops.schemas import JobSpec, SandboxSpec, JobCommand
+        cmd_list = [c.strip() for c in commands.split("|") if c.strip()]
+        spec = JobSpec(
+            job_id=f"predict_{uuid.uuid4().hex[:8]}",
+            sandbox=SandboxSpec(image=image),
+            commands=[JobCommand(command=c) for c in cmd_list],
+            ttl_seconds=timeout,
+        )
+        dp = _duration_predictor()
+        fp = _failure_predictor()
+        dur = dp.predict(spec)
+        risk = fp.assess_risk(spec)
+        return _success(
+            duration=json.loads(dur.model_dump_json()),
+            failure_risk=json.loads(risk.model_dump_json()),
+        )
+    except Exception as exc:
+        return _error("PREDICT_ERROR", str(exc))
+
+
+# ===================================================================
+# Recommendation Tools
+# ===================================================================
+
+_re = None
+_rstore = None
+
+
+def _recommendation_engine():
+    global _re
+    if _re is None:
+        from orcaops.run_store import RunStore
+        from orcaops.metrics import BaselineTracker
+        from orcaops.recommendation_engine import RecommendationEngine
+        _re = RecommendationEngine(RunStore(), _baseline_tracker())
+    return _re
+
+
+def _recommendation_store():
+    global _rstore
+    if _rstore is None:
+        from orcaops.recommendation_engine import RecommendationStore
+        _rstore = RecommendationStore()
+    return _rstore
+
+
+@server.tool(
+    name="orcaops_get_recommendations",
+    description="List stored recommendations. Optionally filter by type (performance, cost, reliability, security).",
+)
+def orcaops_get_recommendations(rec_type: str = "", limit: int = 50) -> str:
+    """List recommendations."""
+    try:
+        from orcaops.schemas import RecommendationType
+        store = _recommendation_store()
+        rt = None
+        if rec_type:
+            try:
+                rt = RecommendationType(rec_type)
+            except ValueError:
+                return _error("INVALID_TYPE", f"Invalid recommendation type: {rec_type}")
+        recs = store.list_recommendations(rec_type=rt, limit=limit)
+        return _success(
+            recommendations=[json.loads(r.model_dump_json()) for r in recs],
+            count=len(recs),
+        )
+    except Exception as exc:
+        return _error("LIST_RECOMMENDATIONS_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_generate_recommendations",
+    description="Generate fresh recommendations from job history and baselines.",
+)
+def orcaops_generate_recommendations(workspace_id: str = "") -> str:
+    """Generate recommendations."""
+    try:
+        engine = _recommendation_engine()
+        store = _recommendation_store()
+        ws = workspace_id or None
+        recs = engine.generate_recommendations(workspace_id=ws)
+        for rec in recs:
+            store.save(rec)
+        return _success(
+            recommendations=[json.loads(r.model_dump_json()) for r in recs],
+            count=len(recs),
+        )
+    except Exception as exc:
+        return _error("GENERATE_RECOMMENDATIONS_ERROR", str(exc))
+
+
+# ===================================================================
+# Anomaly Tools
+# ===================================================================
+
+_as = None
+
+
+def _anomaly_store():
+    global _as
+    if _as is None:
+        from orcaops.anomaly_detector import AnomalyStore
+        _as = AnomalyStore()
+    return _as
+
+
+@server.tool(
+    name="orcaops_list_anomalies",
+    description="List detected performance anomalies with optional filters (type, severity, job_id, acknowledged).",
+)
+def orcaops_list_anomalies(
+    anomaly_type: str = "",
+    severity: str = "",
+    job_id: str = "",
+    limit: int = 50,
+) -> str:
+    """List anomalies with optional filters."""
+    try:
+        from orcaops.schemas import AnomalyType, AnomalySeverity
+        store = _anomaly_store()
+        at = None
+        if anomaly_type:
+            try:
+                at = AnomalyType(anomaly_type)
+            except ValueError:
+                return _error("INVALID_TYPE", f"Invalid anomaly type: {anomaly_type}")
+        sev = None
+        if severity:
+            try:
+                sev = AnomalySeverity(severity)
+            except ValueError:
+                return _error("INVALID_SEVERITY", f"Invalid severity: {severity}")
+        jid = job_id or None
+        anomalies, total = store.query(
+            anomaly_type=at, severity=sev, job_id=jid, limit=limit,
+        )
+        return _success(
+            anomalies=[json.loads(a.model_dump_json()) for a in anomalies],
+            total=total,
+            count=len(anomalies),
+        )
+    except Exception as exc:
+        return _error("LIST_ANOMALIES_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_acknowledge_anomaly",
+    description="Acknowledge/dismiss a detected anomaly by its ID.",
+)
+def orcaops_acknowledge_anomaly(anomaly_id: str) -> str:
+    """Acknowledge an anomaly."""
+    try:
+        store = _anomaly_store()
+        if store.acknowledge(anomaly_id):
+            return _success(anomaly_id=anomaly_id, message=f"Anomaly '{anomaly_id}' acknowledged.")
+        return _error("NOT_FOUND", f"Anomaly '{anomaly_id}' not found.")
+    except Exception as exc:
+        return _error("ACKNOWLEDGE_ERROR", str(exc))
+
+
+# ===================================================================
 # Entry point
 # ===================================================================
 

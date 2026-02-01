@@ -23,6 +23,8 @@ class AnomalyType(str, Enum):
     DURATION = "duration"
     MEMORY = "memory"
     ERROR_PATTERN = "error_pattern"
+    FLAKY = "flaky"
+    SUCCESS_RATE_DEGRADATION = "success_rate_degradation"
 
 class AnomalySeverity(str, Enum):
     INFO = "info"
@@ -779,3 +781,170 @@ class SessionListResponse(BaseModel):
     """List of sessions."""
     sessions: List[AgentSession]
     count: int
+
+
+# --- Sprint 06: AI-Driven Optimization Models ---
+
+class PerformanceBaseline(BaseModel):
+    """Enhanced baseline with statistical measures."""
+    key: str
+    sample_count: int = 0
+    # Duration stats
+    duration_ema: float = 0.0
+    duration_mean: float = 0.0
+    duration_stddev: float = 0.0
+    duration_p50: float = 0.0
+    duration_p95: float = 0.0
+    duration_p99: float = 0.0
+    duration_min: float = 0.0
+    duration_max: float = 0.0
+    # Memory stats
+    memory_mean_mb: float = 0.0
+    memory_max_mb: float = 0.0
+    # Success tracking
+    success_count: int = 0
+    failure_count: int = 0
+    success_rate: float = 1.0
+    # Rolling window for percentile computation
+    recent_durations: List[float] = Field(default_factory=list)
+    recent_memory_mb: List[float] = Field(default_factory=list)
+    # Metadata
+    last_duration: float = 0.0
+    last_updated: Optional[datetime] = None
+    first_seen: Optional[datetime] = None
+
+
+class BaselineListResponse(BaseModel):
+    """Response for listing baselines."""
+    baselines: List[PerformanceBaseline]
+    count: int
+
+
+class BaselineResponse(BaseModel):
+    """Response for a single baseline."""
+    baseline: PerformanceBaseline
+
+
+class AnomalyRecord(BaseModel):
+    """Persisted anomaly with full context."""
+    anomaly_id: str
+    job_id: str
+    baseline_key: str
+    anomaly_type: AnomalyType
+    severity: AnomalySeverity
+    title: str
+    description: str
+    expected: str
+    actual: str
+    z_score: Optional[float] = None
+    deviation_percent: Optional[float] = None
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    acknowledged: bool = False
+    resolution: Optional[str] = None
+
+
+class AnomalyListResponse(BaseModel):
+    """Response for listing anomalies."""
+    anomalies: List[AnomalyRecord]
+    total: int
+    offset: int
+    limit: int
+
+
+class RecommendationType(str, Enum):
+    PERFORMANCE = "performance"
+    COST = "cost"
+    RELIABILITY = "reliability"
+    SECURITY = "security"
+
+
+class RecommendationPriority(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class RecommendationStatus(str, Enum):
+    ACTIVE = "active"
+    DISMISSED = "dismissed"
+    APPLIED = "applied"
+
+
+class Recommendation(BaseModel):
+    """An actionable recommendation based on pattern analysis."""
+    recommendation_id: str
+    rec_type: RecommendationType
+    priority: RecommendationPriority
+    title: str
+    description: str
+    impact: str
+    action: str
+    evidence: Dict[str, Any] = Field(default_factory=dict)
+    status: RecommendationStatus = RecommendationStatus.ACTIVE
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    workspace_id: Optional[str] = None
+
+
+class RecommendationListResponse(BaseModel):
+    """Response for listing recommendations."""
+    recommendations: List[Recommendation]
+    count: int
+
+
+class DurationPrediction(BaseModel):
+    """Predicted job duration with confidence."""
+    estimated_seconds: float
+    confidence: float
+    range_low: float
+    range_high: float
+    sample_count: int
+    baseline_key: Optional[str] = None
+
+
+class FailureRiskAssessment(BaseModel):
+    """Predicted failure risk for a job."""
+    risk_score: float
+    risk_level: str
+    factors: List[str] = Field(default_factory=list)
+    historical_success_rate: Optional[float] = None
+    sample_count: int = 0
+    baseline_key: Optional[str] = None
+
+
+class PredictionResponse(BaseModel):
+    """Combined prediction response."""
+    duration: Optional[DurationPrediction] = None
+    failure_risk: Optional[FailureRiskAssessment] = None
+
+
+class OptimizationSuggestion(BaseModel):
+    """A specific optimization suggestion for a job."""
+    suggestion_type: str
+    current_value: str
+    suggested_value: str
+    reason: str
+    confidence: float
+    baseline_key: str
+
+
+class FailurePattern(BaseModel):
+    """A known failure pattern with solutions."""
+    pattern_id: str
+    regex_pattern: str
+    category: str
+    title: str
+    description: str
+    solutions: List[str] = Field(default_factory=list)
+    occurrences: int = 0
+    last_seen: Optional[datetime] = None
+
+
+class DebugAnalysis(BaseModel):
+    """Result of debugging analysis on a failed job."""
+    job_id: str
+    summary: str
+    likely_causes: List[str] = Field(default_factory=list)
+    matched_patterns: List[FailurePattern] = Field(default_factory=list)
+    suggested_fixes: List[str] = Field(default_factory=list)
+    similar_job_ids: List[str] = Field(default_factory=list)
+    next_steps: List[str] = Field(default_factory=list)

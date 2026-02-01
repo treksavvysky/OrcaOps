@@ -54,7 +54,7 @@ orcaops-mcp --debug
 }
 ```
 
-42 MCP tools available: `orcaops_run_job`, `orcaops_submit_job`, `orcaops_list_jobs`, `orcaops_get_job_status`, `orcaops_get_job_logs`, `orcaops_cancel_job`, `orcaops_list_artifacts`, `orcaops_get_artifact`, `orcaops_list_sandboxes`, `orcaops_get_sandbox`, `orcaops_create_sandbox`, `orcaops_start_sandbox`, `orcaops_stop_sandbox`, `orcaops_list_templates`, `orcaops_get_template`, `orcaops_list_containers`, `orcaops_get_container_logs`, `orcaops_inspect_container`, `orcaops_stop_container`, `orcaops_remove_container`, `orcaops_system_info`, `orcaops_cleanup_containers`, `orcaops_list_runs`, `orcaops_get_run`, `orcaops_delete_run`, `orcaops_cleanup_runs`, `orcaops_get_job_summary`, `orcaops_get_metrics`, `orcaops_run_workflow`, `orcaops_submit_workflow`, `orcaops_get_workflow_status`, `orcaops_cancel_workflow`, `orcaops_list_workflows`, `orcaops_create_workspace`, `orcaops_list_workspaces`, `orcaops_get_workspace`, `orcaops_create_api_key`, `orcaops_revoke_api_key`, `orcaops_query_audit`, `orcaops_create_session`, `orcaops_get_session`, `orcaops_list_sessions`, `orcaops_end_session`.
+53 MCP tools available: `orcaops_run_job`, `orcaops_submit_job`, `orcaops_list_jobs`, `orcaops_get_job_status`, `orcaops_get_job_logs`, `orcaops_cancel_job`, `orcaops_list_artifacts`, `orcaops_get_artifact`, `orcaops_list_sandboxes`, `orcaops_get_sandbox`, `orcaops_create_sandbox`, `orcaops_start_sandbox`, `orcaops_stop_sandbox`, `orcaops_list_templates`, `orcaops_get_template`, `orcaops_list_containers`, `orcaops_get_container_logs`, `orcaops_inspect_container`, `orcaops_stop_container`, `orcaops_remove_container`, `orcaops_system_info`, `orcaops_cleanup_containers`, `orcaops_list_runs`, `orcaops_get_run`, `orcaops_delete_run`, `orcaops_cleanup_runs`, `orcaops_get_job_summary`, `orcaops_get_metrics`, `orcaops_run_workflow`, `orcaops_submit_workflow`, `orcaops_get_workflow_status`, `orcaops_cancel_workflow`, `orcaops_list_workflows`, `orcaops_create_workspace`, `orcaops_list_workspaces`, `orcaops_get_workspace`, `orcaops_create_api_key`, `orcaops_revoke_api_key`, `orcaops_query_audit`, `orcaops_create_session`, `orcaops_get_session`, `orcaops_list_sessions`, `orcaops_end_session`, `orcaops_list_baselines`, `orcaops_get_baseline`, `orcaops_delete_baseline`, `orcaops_list_anomalies`, `orcaops_acknowledge_anomaly`, `orcaops_get_recommendations`, `orcaops_generate_recommendations`, `orcaops_predict_job`, `orcaops_optimize_job`, `orcaops_debug_job`, `orcaops_list_failure_patterns`.
 
 No linter or formatter is configured. No CI/CD pipeline exists yet.
 
@@ -93,7 +93,17 @@ MCP (FastMCP) ─┘
 
 - **`log_analyzer.py`** — Regex-based log analysis (`LogAnalyzer`) and deterministic summary generation (`SummaryGenerator`). Detects errors, warnings, and stack traces (Python, Node.js, Go, Java) in job output. Generates one-liner summaries, key events, and actionable suggestions.
 
-- **`metrics.py`** — On-the-fly metrics aggregation (`MetricsAggregator`) from RunStore and EMA-based duration baseline tracking (`BaselineTracker`). Baselines persist to `~/.orcaops/baselines.json` and detect anomalies when duration exceeds 2x the EMA after 3+ data points.
+- **`metrics.py`** — On-the-fly metrics aggregation (`MetricsAggregator`) from RunStore and EMA-based duration baseline tracking (`BaselineTracker`). Enhanced with percentiles (p50/p95/p99 via `statistics.quantiles`), memory tracking, success rate, rolling sample window (max 200), thread safety, and backward-compatible migration. Baselines persist to `~/.orcaops/baselines.json`.
+
+- **`anomaly_detector.py`** — Z-score based anomaly detection (`AnomalyDetector`) and JSONL persistence (`AnomalyStore`). Detects duration anomalies (|z|>2 WARNING, |z|>3 CRITICAL), memory anomalies (>1.5x/2x peak), flaky job patterns, and success rate degradation. Storage at `~/.orcaops/anomalies/YYYY-MM-DD.jsonl`.
+
+- **`recommendation_engine.py`** — Pattern-based recommendation generation (`RecommendationEngine`) and JSON file persistence (`RecommendationStore`). Checks image optimization (slim/alpine), timeout optimization, caching opportunities, resource right-sizing, and reliability. Storage at `~/.orcaops/recommendations/{id}.json`.
+
+- **`predictor.py`** — Duration prediction (`DurationPredictor`) using p50/EMA with confidence scaling, and failure risk assessment (`FailurePredictor`) based on historical success rates.
+
+- **`auto_optimizer.py`** — Timeout and memory optimization suggestions (`AutoOptimizer`). Suggests p99*1.5 timeout when significantly below current, and memory limits based on peak*1.5 headroom.
+
+- **`knowledge_base.py`** — Failure pattern knowledge base (`FailureKnowledgeBase`) with 7 built-in patterns (ModuleNotFoundError, npm errors, OOM, connection refused, permission denied, syntax errors, timeouts). Supports custom patterns via `~/.orcaops/failure_patterns.json`, debug analysis with pattern matching, similar job finding, and occurrence tracking.
 
 - **`workflow_schema.py`** — YAML-based workflow spec loading, DAG validation (cycle detection via `graphlib.TopologicalSorter`), execution order computation, matrix expansion (`itertools.product`), and safe condition evaluation (`ConditionEvaluator` with regex-based parsing, no `eval`).
 
@@ -132,7 +142,9 @@ MCP (FastMCP) ─┘
 - `cli_workflows.py` — Workflow management commands (workflow run/status/cancel, workflow list)
 - `cli_workspaces.py` — Workspace management commands (workspace create/list/status, workspace keys create/list/revoke, workspace audit, workspace sessions)
 
-New container commands go in `cli_enhanced.py`. Sandbox commands go in `cli_utils_fixed.py`. Job commands go in `cli_jobs.py`. Workflow commands go in `cli_workflows.py`. Workspace/auth/audit/session commands go in `cli_workspaces.py`.
+- `cli_optimization.py` — Optimization CLI commands (optimize suggest/predict/debug/anomalies/recommendations/patterns)
+
+New container commands go in `cli_enhanced.py`. Sandbox commands go in `cli_utils_fixed.py`. Job commands go in `cli_jobs.py`. Workflow commands go in `cli_workflows.py`. Workspace/auth/audit/session commands go in `cli_workspaces.py`. Optimization/prediction/debug commands go in `cli_optimization.py`.
 
 ### Data Flow for Job Execution
 
@@ -168,6 +180,9 @@ New container commands go in `cli_enhanced.py`. Sandbox commands go in `cli_util
 - **API keys**: `~/.orcaops/workspaces/{workspace_id}/keys/{key_id}.json` (bcrypt-hashed)
 - **Audit logs**: `~/.orcaops/audit/YYYY-MM-DD.jsonl` (append-only JSONL)
 - **Agent sessions**: `~/.orcaops/sessions/{session_id}.json`
+- **Anomaly records**: `~/.orcaops/anomalies/YYYY-MM-DD.jsonl` (date-partitioned JSONL)
+- **Recommendations**: `~/.orcaops/recommendations/{id}.json` (individual JSON files)
+- **Custom failure patterns**: `~/.orcaops/failure_patterns.json`
 
 ### Cleanup Policies (sandboxes.yml)
 
@@ -227,9 +242,26 @@ Tests use `unittest.mock.patch` extensively to mock Docker SDK calls. No real Do
 - `test_session_manager.py` — SessionManager tests (lifecycle, resources, filters, idle expiry, persistence)
 - `test_cli_workspaces.py` — Workspace CLI tests (create, list, status, keys, audit, sessions)
 - `test_mcp_workspaces.py` — Workspace/auth/audit/session MCP tool tests
+- `test_enhanced_baselines.py` — Enhanced BaselineTracker tests (migration, percentiles, memory, success rate, thread safety)
+- `test_api_baselines.py` — Baseline API endpoint tests
+- `test_mcp_baselines.py` — Baseline MCP tool tests
+- `test_anomaly_detector.py` — AnomalyDetector unit tests (z-score, memory, flaky, degradation) + AnomalyStore tests
+- `test_api_anomalies.py` — Anomaly API endpoint tests
+- `test_mcp_anomalies.py` — Anomaly MCP tool tests
+- `test_recommendation_engine.py` — RecommendationEngine tests (image, timeout, caching, reliability) + RecommendationStore tests
+- `test_api_recommendations.py` — Recommendation API endpoint tests
+- `test_mcp_recommendations.py` — Recommendation MCP tool tests
+- `test_predictor.py` — DurationPredictor and FailurePredictor tests
+- `test_api_predictions.py` — Prediction API endpoint tests
+- `test_mcp_predictions.py` — Prediction MCP tool tests
+- `test_auto_optimizer.py` — AutoOptimizer tests (timeout, memory suggestions)
+- `test_knowledge_base.py` — FailureKnowledgeBase tests (pattern matching, debug analysis, custom patterns)
+- `test_api_optimization.py` — Optimization/debug API endpoint tests
+- `test_mcp_optimization.py` — Optimization/debug MCP tool tests
+- `test_cli_optimization.py` — Optimization CLI command tests
 
 Coverage is configured in `pyproject.toml` via pytest addopts: `--cov=orcaops --cov-report=term-missing`.
 
 ## Product Context
 
-OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Sprint 01 (Job Execution API), Sprint 02 (MCP Server Integration), Sprint 03 (Observability & Intelligent Run Records), Sprint 04 (Workflow Engine & Job Chaining), and Sprint 05 (Multi-Tenant Workspaces & Security Policies) are complete. Next: Sprint 06.
+OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). All sprints are complete: Sprint 01 (Job Execution API), Sprint 02 (MCP Server Integration), Sprint 03 (Observability & Intelligent Run Records), Sprint 04 (Workflow Engine & Job Chaining), Sprint 05 (Multi-Tenant Workspaces & Security Policies), Sprint 06 (AI-Driven Optimization & Self-Improvement).

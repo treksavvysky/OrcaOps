@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from orcaops.docker_manager import DockerManager
 from orcaops.job_runner import JobRunner
-from orcaops.schemas import JobSpec, RunRecord, JobStatus, AuditAction, AuditOutcome
+from orcaops.schemas import JobSpec, RunRecord, JobStatus, Anomaly, AuditAction, AuditOutcome
 
 _TERMINAL_STATUSES = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.CANCELLED}
 _MAX_COMPLETED_JOBS = 200
@@ -31,6 +31,7 @@ class JobManager:
         audit_logger=None,
         quota_tracker=None,
         workspace_registry=None,
+        baseline_tracker=None,
     ):
         self.output_dir = output_dir or os.path.expanduser("~/.orcaops/artifacts")
         os.makedirs(self.output_dir, exist_ok=True)
@@ -42,6 +43,7 @@ class JobManager:
         self._audit_logger = audit_logger
         self._quota_tracker = quota_tracker
         self._workspace_registry = workspace_registry
+        self._baseline_tracker = baseline_tracker
 
     def submit_job(self, spec: JobSpec) -> RunRecord:
         if not spec.job_id:
@@ -138,11 +140,32 @@ class JobManager:
 
         # Update baseline tracking
         try:
-            from orcaops.metrics import BaselineTracker
-            tracker = BaselineTracker()
+            if self._baseline_tracker:
+                tracker = self._baseline_tracker
+            else:
+                from orcaops.metrics import BaselineTracker
+                tracker = BaselineTracker()
             anomaly = tracker.update(record)
             if anomaly:
                 record.anomalies.append(anomaly)
+
+            # Enhanced anomaly detection
+            baseline = tracker.get_baseline(record)
+            if baseline:
+                from orcaops.anomaly_detector import AnomalyDetector, AnomalyStore
+                detector = AnomalyDetector()
+                anomaly_records = detector.detect(record, baseline)
+                if anomaly_records:
+                    store = AnomalyStore()
+                    for ar in anomaly_records:
+                        store.store(ar)
+                        record.anomalies.append(Anomaly(
+                            anomaly_type=ar.anomaly_type,
+                            severity=ar.severity,
+                            expected=ar.expected,
+                            actual=ar.actual,
+                            message=ar.description,
+                        ))
         except Exception:
             pass  # Baseline tracking is best-effort
 

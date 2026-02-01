@@ -11,14 +11,18 @@ from orcaops.cli_utils_fixed import CLICommands, CLIUtils
 CLICommands.add_commands(app)
 
 # Add job management commands
-from orcaops.cli_jobs import JobCLI
+from orcaops.cli_jobs import JobCLI, BaselineCLI
 JobCLI.add_commands(app)
+BaselineCLI.add_commands(app)
 
 from orcaops.cli_workflows import WorkflowCLI
 WorkflowCLI.add_commands(app)
 
 from orcaops.cli_workspaces import WorkspaceCLI
 WorkspaceCLI.add_commands(app)
+
+from orcaops.cli_optimization import OptimizationCLI
+OptimizationCLI.add_commands(app)
 
 @app.command("version", help="📦 Show OrcaOps version information")
 def show_version():
