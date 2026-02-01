@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from orcaops.docker_manager import DockerManager
 from orcaops.job_runner import JobRunner
-from orcaops.schemas import JobSpec, RunRecord, JobStatus
+from orcaops.schemas import JobSpec, RunRecord, JobStatus, AuditAction, AuditOutcome
 
 _TERMINAL_STATUSES = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.CANCELLED}
 _MAX_COMPLETED_JOBS = 200
@@ -24,17 +24,71 @@ class JobEntry:
 
 
 class JobManager:
-    def __init__(self, output_dir: Optional[str] = None):
+    def __init__(
+        self,
+        output_dir: Optional[str] = None,
+        policy_engine=None,
+        audit_logger=None,
+        quota_tracker=None,
+        workspace_registry=None,
+    ):
         self.output_dir = output_dir or os.path.expanduser("~/.orcaops/artifacts")
         os.makedirs(self.output_dir, exist_ok=True)
         self.runner = JobRunner(self.output_dir)
         self._docker = DockerManager()
         self._lock = threading.Lock()
         self._jobs: Dict[str, JobEntry] = {}
+        self._policy_engine = policy_engine
+        self._audit_logger = audit_logger
+        self._quota_tracker = quota_tracker
+        self._workspace_registry = workspace_registry
 
     def submit_job(self, spec: JobSpec) -> RunRecord:
         if not spec.job_id:
             raise ValueError("job_id is required")
+
+        # Policy enforcement
+        if self._policy_engine:
+            ws_settings = None
+            if spec.workspace_id and self._workspace_registry:
+                ws = self._workspace_registry.get_workspace(spec.workspace_id)
+                if ws:
+                    ws_settings = ws.settings
+            from orcaops.policy_engine import PolicyEngine
+            engine = PolicyEngine(self._policy_engine, workspace_settings=ws_settings)
+            result = engine.validate_job(spec)
+            if not result.allowed:
+                if self._audit_logger:
+                    self._audit_logger.log_action(
+                        workspace_id=spec.workspace_id or "ws_default",
+                        actor_type="system",
+                        actor_id="job_manager",
+                        action=AuditAction.POLICY_VIOLATION,
+                        resource_type="job",
+                        resource_id=spec.job_id,
+                        outcome=AuditOutcome.DENIED,
+                        details={"violations": result.violations},
+                    )
+                raise ValueError(
+                    f"Policy violation: {'; '.join(result.violations)}"
+                )
+
+        # Quota enforcement
+        if self._quota_tracker and spec.workspace_id and self._workspace_registry:
+            ws = self._workspace_registry.get_workspace(spec.workspace_id)
+            if ws:
+                allowed, reason = self._quota_tracker.check_limits(
+                    spec.workspace_id, ws.limits, resource_type="job"
+                )
+                if not allowed:
+                    raise ValueError(f"Quota exceeded: {reason}")
+
+        # Inject container security opts into metadata
+        if self._policy_engine:
+            from orcaops.policy_engine import PolicyEngine
+            engine = PolicyEngine(self._policy_engine)
+            sec_opts = engine.get_container_security_opts()
+            spec.metadata["_security_opts"] = sec_opts
 
         with self._lock:
             if spec.job_id in self._jobs:
@@ -45,6 +99,7 @@ class JobManager:
                 status=JobStatus.QUEUED,
                 created_at=datetime.now(timezone.utc),
                 image_ref=spec.sandbox.image,
+                workspace_id=spec.workspace_id,
             )
             cancel_event = threading.Event()
             thread = threading.Thread(
@@ -74,6 +129,10 @@ class JobManager:
             entry.record.status = JobStatus.RUNNING
             entry.record.started_at = datetime.now(timezone.utc)
 
+        # Track quota
+        if self._quota_tracker and spec.workspace_id:
+            self._quota_tracker.on_job_start(spec.workspace_id, spec.job_id)
+
         # Long-running call — no locks held
         record = self.runner.run_sandbox_job(spec)
 
@@ -100,6 +159,23 @@ class JobManager:
 
             # Persist final state atomically
             self._overwrite_run_record(entry.record)
+
+        # Release quota
+        if self._quota_tracker and spec.workspace_id:
+            self._quota_tracker.on_job_end(spec.workspace_id, spec.job_id)
+
+        # Audit log completion
+        if self._audit_logger and spec.workspace_id:
+            self._audit_logger.log_action(
+                workspace_id=spec.workspace_id,
+                actor_type="system",
+                actor_id="job_manager",
+                action=AuditAction.JOB_COMPLETED,
+                resource_type="job",
+                resource_id=spec.job_id,
+                outcome=AuditOutcome.SUCCESS if record.status == JobStatus.SUCCESS else AuditOutcome.ERROR,
+                details={"status": record.status.value},
+            )
 
         # Evict from in-memory cache now that it's persisted
         self._evict_if_terminal(spec.job_id)

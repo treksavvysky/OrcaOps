@@ -54,7 +54,7 @@ orcaops-mcp --debug
 }
 ```
 
-31 MCP tools available: `orcaops_run_job`, `orcaops_submit_job`, `orcaops_list_jobs`, `orcaops_get_job_status`, `orcaops_get_job_logs`, `orcaops_cancel_job`, `orcaops_list_artifacts`, `orcaops_get_artifact`, `orcaops_list_sandboxes`, `orcaops_get_sandbox`, `orcaops_create_sandbox`, `orcaops_start_sandbox`, `orcaops_stop_sandbox`, `orcaops_list_templates`, `orcaops_get_template`, `orcaops_list_containers`, `orcaops_get_container_logs`, `orcaops_inspect_container`, `orcaops_stop_container`, `orcaops_remove_container`, `orcaops_system_info`, `orcaops_cleanup_containers`, `orcaops_list_runs`, `orcaops_get_run`, `orcaops_delete_run`, `orcaops_cleanup_runs`, `orcaops_get_job_summary`, `orcaops_get_metrics`, `orcaops_run_workflow`, `orcaops_submit_workflow`, `orcaops_get_workflow_status`, `orcaops_cancel_workflow`, `orcaops_list_workflows`.
+42 MCP tools available: `orcaops_run_job`, `orcaops_submit_job`, `orcaops_list_jobs`, `orcaops_get_job_status`, `orcaops_get_job_logs`, `orcaops_cancel_job`, `orcaops_list_artifacts`, `orcaops_get_artifact`, `orcaops_list_sandboxes`, `orcaops_get_sandbox`, `orcaops_create_sandbox`, `orcaops_start_sandbox`, `orcaops_stop_sandbox`, `orcaops_list_templates`, `orcaops_get_template`, `orcaops_list_containers`, `orcaops_get_container_logs`, `orcaops_inspect_container`, `orcaops_stop_container`, `orcaops_remove_container`, `orcaops_system_info`, `orcaops_cleanup_containers`, `orcaops_list_runs`, `orcaops_get_run`, `orcaops_delete_run`, `orcaops_cleanup_runs`, `orcaops_get_job_summary`, `orcaops_get_metrics`, `orcaops_run_workflow`, `orcaops_submit_workflow`, `orcaops_get_workflow_status`, `orcaops_cancel_workflow`, `orcaops_list_workflows`, `orcaops_create_workspace`, `orcaops_list_workspaces`, `orcaops_get_workspace`, `orcaops_create_api_key`, `orcaops_revoke_api_key`, `orcaops_query_audit`, `orcaops_create_session`, `orcaops_get_session`, `orcaops_list_sessions`, `orcaops_end_session`.
 
 No linter or formatter is configured. No CI/CD pipeline exists yet.
 
@@ -87,7 +87,7 @@ MCP (FastMCP) ─┘
 
 - **`sandbox_runner.py`** — Loads sandbox definitions from `sandboxes.yml` into `SandboxConfig` dataclasses. Manages container lifecycle with cleanup policies.
 
-- **`schemas.py`** — All Pydantic models. Core chain: `JobSpec` → `StepResult` → `RunRecord`. Workflow models: `WorkflowSpec`, `WorkflowJob`, `WorkflowRecord`, `WorkflowJobStatus`, `ServiceDefinition`, `MatrixConfig`. Also defines API request/response models and enums (`JobStatus`, `WorkflowStatus`, `CleanupStatus`, `SandboxStatus`).
+- **`schemas.py`** — All Pydantic models. Core chain: `JobSpec` → `StepResult` → `RunRecord`. Workflow models: `WorkflowSpec`, `WorkflowJob`, `WorkflowRecord`, `WorkflowJobStatus`, `ServiceDefinition`, `MatrixConfig`. Workspace models: `Workspace`, `WorkspaceSettings`, `ResourceLimits`, `WorkspaceUsage`. Auth models: `Permission`, `APIKey`. Security models: `SecurityPolicy`, `ImagePolicy`, `CommandPolicy`, `PolicyResult`. Audit models: `AuditEvent`, `AuditAction`, `AuditOutcome`. Session models: `AgentSession`, `SessionStatus`. Also defines API request/response models and enums (`JobStatus`, `WorkflowStatus`, `WorkspaceStatus`, `OwnerType`, `CleanupStatus`, `SandboxStatus`).
 
 - **`run_store.py`** — Disk-backed persistence layer for historical run records. Scans `~/.orcaops/artifacts/*/run.json` for listing, filtering (by status, image, tags, triggered_by, date range, duration), deletion, and time-based cleanup.
 
@@ -105,9 +105,23 @@ MCP (FastMCP) ─┘
 
 - **`service_manager.py`** — Service container lifecycle for workflow jobs (`ServiceManager`). Creates Docker networks, starts service containers with health checks, injects `{SERVICE}_HOST`/`{SERVICE}_PORT` env vars, and cleans up after job completion.
 
-- **`api.py`** — FastAPI router. Instantiates `DockerManager`, `JobManager`, `RunStore`, `WorkflowManager`, and `WorkflowStore` as module-level singletons. Endpoints for containers (`/ps`, `/logs`, etc.), sandboxes, templates, jobs (`/jobs`, `/jobs/{id}`, `/jobs/{id}/cancel`, `/jobs/{id}/artifacts`, `/jobs/{id}/logs/stream`, `/jobs/{id}/summary`), metrics (`/metrics/jobs`), run history (`/runs`, `/runs/{id}`, `/runs/cleanup`), and workflows (`/workflows`, `/workflows/{id}`, `/workflows/{id}/jobs`, `/workflows/{id}/cancel`).
+- **`workspace.py`** — Thread-safe workspace registry (`WorkspaceRegistry`). CRUD operations for workspaces with JSON file persistence at `~/.orcaops/workspaces/{workspace_id}/workspace.json`. Auto-creates default workspace (`ws_default`).
 
-- **`mcp_server.py`** — MCP server using FastMCP (decorator-based API). Exposes 31 tools across 7 categories (job execution, sandbox management, containers, system, observability, run history, workflows). Uses lazy-initialized singletons for `JobManager`, `RunStore`, `DockerManager`, `SandboxRegistry`, `WorkflowManager`, and `WorkflowStore`. All tools return structured JSON with `success`/`error` fields. Stdio transport for Claude Code integration.
+- **`auth.py`** — API key management (`KeyManager`). Generates bcrypt-hashed keys (format: `orcaops_{workspace_id}_{random32}`), validates keys, tracks `last_used`, supports key rotation. Role templates: admin, developer, viewer, ci. `has_permission()` checks with `WORKSPACE_ADMIN` inheritance.
+
+- **`auth_middleware.py`** — FastAPI auth dependencies. `AuthContext` model, `get_auth_context()` from Bearer header, `require_auth()` (401), `require_permission(permission)` factory (403). Auth is opt-in — when no keys exist, requests pass through.
+
+- **`policy_engine.py`** — Security policy validation (`PolicyEngine`). `validate_image()` via `fnmatch` glob patterns, `validate_command()` via exact match + regex, `validate_job()` combines both. `get_container_security_opts()` returns Docker security options. Merges workspace-level settings with global policy.
+
+- **`audit.py`** — Thread-safe JSONL audit logging (`AuditLogger`) with date-based files (`~/.orcaops/audit/YYYY-MM-DD.jsonl`). Read-only query layer (`AuditStore`) with filters (workspace, actor, action, date range) and pagination. Cleanup of old files.
+
+- **`quota_tracker.py`** — Thread-safe resource limit enforcement (`QuotaTracker`). Tracks concurrent running jobs/sandboxes per workspace, daily job counts. `check_limits()` validates against `ResourceLimits` before job creation.
+
+- **`session_manager.py`** — Agent session lifecycle manager (`SessionManager`). Creates/tracks MCP sessions with resource attribution. Supports idle expiration, explicit session end, disk persistence at `~/.orcaops/sessions/{session_id}.json`.
+
+- **`api.py`** — FastAPI router. Instantiates `DockerManager`, `JobManager`, `RunStore`, `WorkflowManager`, `WorkflowStore`, `WorkspaceRegistry`, `KeyManager`, and `SessionManager` as module-level singletons. Endpoints for containers (`/ps`, `/logs`, etc.), sandboxes, templates, jobs (`/jobs`, `/jobs/{id}`, `/jobs/{id}/cancel`, `/jobs/{id}/artifacts`, `/jobs/{id}/logs/stream`, `/jobs/{id}/summary`), metrics (`/metrics/jobs`), run history (`/runs`, `/runs/{id}`, `/runs/cleanup`), workflows (`/workflows`, `/workflows/{id}`, `/workflows/{id}/jobs`, `/workflows/{id}/cancel`), workspaces (`/workspaces`, `/workspaces/{id}`, `/workspaces/{id}/keys`), and sessions (`/sessions`, `/sessions/{id}`).
+
+- **`mcp_server.py`** — MCP server using FastMCP (decorator-based API). Exposes 42 tools across 11 categories (job execution, sandbox management, containers, system, observability, run history, workflows, workspaces, API keys, audit, sessions). Uses lazy-initialized singletons for all managers. All tools return structured JSON with `success`/`error` fields. Stdio transport for Claude Code integration.
 
 ### CLI Structure
 
@@ -116,8 +130,9 @@ MCP (FastMCP) ─┘
 - `cli_utils_fixed.py` — Sandbox commands (init, list, up, down, cleanup, templates) and `CLIUtils`/`CLICommands` classes
 - `cli_jobs.py` — Job management commands (run, jobs, jobs status/logs/cancel/artifacts/download/summary, metrics, runs-cleanup)
 - `cli_workflows.py` — Workflow management commands (workflow run/status/cancel, workflow list)
+- `cli_workspaces.py` — Workspace management commands (workspace create/list/status, workspace keys create/list/revoke, workspace audit, workspace sessions)
 
-New container commands go in `cli_enhanced.py`. Sandbox commands go in `cli_utils_fixed.py`. Job commands go in `cli_jobs.py`. Workflow commands go in `cli_workflows.py`.
+New container commands go in `cli_enhanced.py`. Sandbox commands go in `cli_utils_fixed.py`. Job commands go in `cli_jobs.py`. Workflow commands go in `cli_workflows.py`. Workspace/auth/audit/session commands go in `cli_workspaces.py`.
 
 ### Data Flow for Job Execution
 
@@ -149,6 +164,10 @@ New container commands go in `cli_enhanced.py`. Sandbox commands go in `cli_util
 - **Baselines**: `~/.orcaops/baselines.json` (EMA-based duration baselines per image+command)
 - **Sandbox registry**: `~/.orcaops/sandboxes.json` (tracks scaffolded projects)
 - **Sandbox definitions**: `sandboxes.yml` at project root
+- **Workspaces**: `~/.orcaops/workspaces/{workspace_id}/workspace.json`
+- **API keys**: `~/.orcaops/workspaces/{workspace_id}/keys/{key_id}.json` (bcrypt-hashed)
+- **Audit logs**: `~/.orcaops/audit/YYYY-MM-DD.jsonl` (append-only JSONL)
+- **Agent sessions**: `~/.orcaops/sessions/{session_id}.json`
 
 ### Cleanup Policies (sandboxes.yml)
 
@@ -197,9 +216,20 @@ Tests use `unittest.mock.patch` extensively to mock Docker SDK calls. No real Do
 - `test_api_workflows.py` — Workflow API endpoint tests (submit, status, jobs, cancel, list)
 - `test_cli_workflows.py` — Workflow CLI command tests (run, status, cancel, list)
 - `test_mcp_workflows.py` — Workflow MCP tool tests (submit, run, status, cancel, list)
+- `test_workspace.py` — WorkspaceRegistry tests (CRUD, validation, persistence, defaults)
+- `test_auth.py` — KeyManager tests (generate, validate, revoke, rotate, permissions, roles)
+- `test_auth_middleware.py` — Auth middleware tests (AuthContext, get/require auth, permissions)
+- `test_api_workspaces.py` — Workspace/key API endpoint tests (CRUD, keys)
+- `test_policy_engine.py` — PolicyEngine tests (image/command validation, workspace merge, security opts)
+- `test_audit.py` — Audit logging tests (JSONL write, query, filters, thread safety, cleanup)
+- `test_quota_tracker.py` — QuotaTracker tests (limits, daily counts, workspace isolation, concurrency)
+- `test_integration_security.py` — Integration tests (policy enforcement, quota, audit, security opts in job manager)
+- `test_session_manager.py` — SessionManager tests (lifecycle, resources, filters, idle expiry, persistence)
+- `test_cli_workspaces.py` — Workspace CLI tests (create, list, status, keys, audit, sessions)
+- `test_mcp_workspaces.py` — Workspace/auth/audit/session MCP tool tests
 
 Coverage is configured in `pyproject.toml` via pytest addopts: `--cov=orcaops --cov-report=term-missing`.
 
 ## Product Context
 
-OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Sprint 01 (Job Execution API), Sprint 02 (MCP Server Integration), Sprint 03 (Observability & Intelligent Run Records), and Sprint 04 (Workflow Engine & Job Chaining) are complete. Next: Sprint 05.
+OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Sprint 01 (Job Execution API), Sprint 02 (MCP Server Integration), Sprint 03 (Observability & Intelligent Run Records), Sprint 04 (Workflow Engine & Job Chaining), and Sprint 05 (Multi-Tenant Workspaces & Security Policies) are complete. Next: Sprint 06.

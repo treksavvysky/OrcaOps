@@ -48,12 +48,29 @@ from orcaops.schemas import (
     WorkflowListResponse,
     WorkflowCancelResponse,
     WorkflowJobsResponse,
+    WorkspaceCreateRequest,
+    WorkspaceUpdateRequest,
+    WorkspaceResponse,
+    WorkspaceListResponse,
+    WorkspaceStatus,
+    APIKeyCreateRequest,
+    APIKeyCreateResponse,
+    APIKeyResponse,
+    APIKeyListResponse,
+    Permission,
+    SessionStatus,
+    SessionResponse,
+    SessionListResponse,
 )
 from orcaops.log_analyzer import SummaryGenerator
 from orcaops.metrics import MetricsAggregator
 from orcaops.workflow_manager import WorkflowManager
 from orcaops.workflow_store import WorkflowStore
 from orcaops.workflow_schema import WorkflowValidationError
+from orcaops.workspace import WorkspaceRegistry
+from orcaops.auth import KeyManager
+from orcaops.auth_middleware import set_key_manager
+from orcaops.session_manager import SessionManager
 
 router = APIRouter()
 docker_manager = DockerManager()
@@ -61,6 +78,10 @@ job_manager = JobManager()
 run_store = RunStore()
 workflow_manager = WorkflowManager(job_manager=job_manager)
 workflow_store = WorkflowStore()
+workspace_registry = WorkspaceRegistry()
+key_manager = KeyManager()
+set_key_manager(key_manager)
+session_manager = SessionManager()
 
 
 # Container Management Endpoints
@@ -893,3 +914,157 @@ async def list_workflows(
     combined.sort(key=lambda r: r.created_at, reverse=True)
     sliced = combined[offset:offset + limit]
     return WorkflowListResponse(workflows=sliced, count=len(combined))
+
+
+# --- Workspace Management Endpoints ---
+
+@router.post("/workspaces", response_model=WorkspaceResponse, summary="Create a workspace")
+async def create_workspace(req: WorkspaceCreateRequest):
+    """Create a new workspace."""
+    try:
+        ws = workspace_registry.create_workspace(
+            name=req.name,
+            owner_type=req.owner_type,
+            owner_id=req.owner_id,
+            settings=req.settings,
+            limits=req.limits,
+        )
+        return WorkspaceResponse(workspace=ws, message="Workspace created.")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/workspaces", response_model=WorkspaceListResponse, summary="List workspaces")
+async def list_workspaces(
+    status: Optional[WorkspaceStatus] = Query(None, description="Filter by status"),
+):
+    """List all workspaces."""
+    workspaces = workspace_registry.list_workspaces(status=status)
+    return WorkspaceListResponse(workspaces=workspaces, count=len(workspaces))
+
+
+@router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Get workspace")
+async def get_workspace(workspace_id: str):
+    """Get a workspace by ID."""
+    ws = workspace_registry.get_workspace(workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found.")
+    return WorkspaceResponse(workspace=ws)
+
+
+@router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse, summary="Update workspace")
+async def update_workspace(workspace_id: str, req: WorkspaceUpdateRequest):
+    """Update workspace settings, limits, or status."""
+    try:
+        ws = workspace_registry.update_workspace(
+            workspace_id,
+            settings=req.settings,
+            limits=req.limits,
+            status=req.status,
+        )
+        return WorkspaceResponse(workspace=ws, message="Workspace updated.")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/workspaces/{workspace_id}", summary="Archive workspace")
+async def archive_workspace(workspace_id: str):
+    """Archive (soft-delete) a workspace."""
+    if not workspace_registry.archive_workspace(workspace_id):
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found.")
+    return {"workspace_id": workspace_id, "status": "archived", "message": "Workspace archived."}
+
+
+# --- API Key Management Endpoints ---
+
+@router.post("/workspaces/{workspace_id}/keys", response_model=APIKeyCreateResponse, summary="Create API key")
+async def create_api_key(workspace_id: str, req: APIKeyCreateRequest):
+    """Generate a new API key for a workspace."""
+    ws = workspace_registry.get_workspace(workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found.")
+    try:
+        plain_key, api_key = key_manager.generate_key(
+            workspace_id=workspace_id,
+            name=req.name,
+            permissions=req.permissions,
+            role=req.role,
+            expires_in_days=req.expires_in_days,
+        )
+        return APIKeyCreateResponse(
+            key_id=api_key.key_id,
+            plain_key=plain_key,
+            name=api_key.name,
+            workspace_id=workspace_id,
+            permissions=list(api_key.permissions),
+            expires_at=api_key.expires_at,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/workspaces/{workspace_id}/keys", response_model=APIKeyListResponse, summary="List API keys")
+async def list_api_keys(workspace_id: str):
+    """List all active API keys for a workspace."""
+    ws = workspace_registry.get_workspace(workspace_id)
+    if ws is None:
+        raise HTTPException(status_code=404, detail=f"Workspace '{workspace_id}' not found.")
+    keys = key_manager.list_keys(workspace_id)
+    key_responses = [
+        APIKeyResponse(
+            key_id=k.key_id,
+            name=k.name,
+            workspace_id=k.workspace_id,
+            permissions=list(k.permissions),
+            created_at=k.created_at,
+            last_used=k.last_used,
+            expires_at=k.expires_at,
+            revoked=k.revoked,
+        )
+        for k in keys
+    ]
+    return APIKeyListResponse(keys=key_responses, count=len(key_responses))
+
+
+@router.delete("/workspaces/{workspace_id}/keys/{key_id}", summary="Revoke API key")
+async def revoke_api_key(workspace_id: str, key_id: str):
+    """Revoke an API key."""
+    if not key_manager.revoke_key(workspace_id, key_id):
+        raise HTTPException(status_code=404, detail=f"Key '{key_id}' not found.")
+    return {"key_id": key_id, "revoked": True, "message": "API key revoked."}
+
+
+# Session Management Endpoints
+
+@router.get("/sessions", response_model=SessionListResponse, summary="List sessions")
+async def list_sessions(
+    workspace_id: Optional[str] = Query(None, description="Filter by workspace"),
+    status: Optional[str] = Query(None, description="Filter by status (active, idle, expired)"),
+):
+    """List agent sessions."""
+    session_status = None
+    if status:
+        try:
+            session_status = SessionStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+    sessions = session_manager.list_sessions(workspace_id=workspace_id, status=session_status)
+    return SessionListResponse(sessions=sessions, count=len(sessions))
+
+
+@router.get("/sessions/{session_id}", response_model=SessionResponse, summary="Get session")
+async def get_session(session_id: str):
+    """Get a session by ID."""
+    session = session_manager.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    return SessionResponse(session=session)
+
+
+@router.delete("/sessions/{session_id}", summary="End session")
+async def end_session(session_id: str):
+    """End an agent session."""
+    session = session_manager.end_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+    return SessionResponse(session=session, message="Session ended.")

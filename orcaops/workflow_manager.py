@@ -56,6 +56,7 @@ class WorkflowManager:
         spec: WorkflowSpec,
         workflow_id: Optional[str] = None,
         triggered_by: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> WorkflowRecord:
         """Submit a workflow for background execution. Returns initial record."""
         wf_id = workflow_id or f"wf-{uuid.uuid4().hex[:12]}"

@@ -60,6 +60,7 @@ class JobRunner:
             parent_job_id=job_spec.parent_job_id,
             tags=list(job_spec.tags),
             metadata=dict(job_spec.metadata),
+            workspace_id=job_spec.workspace_id,
         )
 
         container_id = None
@@ -84,6 +85,20 @@ class JobRunner:
             if job_spec.sandbox.resources:
                 # Map resources if needed.
                 pass
+
+            # Apply security opts from policy engine (injected via metadata)
+            security_opts = job_spec.metadata.get("_security_opts")
+            if security_opts and isinstance(security_opts, dict):
+                if "cap_drop" in security_opts:
+                    run_kwargs["cap_drop"] = security_opts["cap_drop"]
+                if "security_opt" in security_opts:
+                    run_kwargs["security_opt"] = security_opts["security_opt"]
+                if security_opts.get("read_only"):
+                    run_kwargs["read_only"] = True
+                if "mem_limit" in security_opts:
+                    run_kwargs["mem_limit"] = security_opts["mem_limit"]
+                if "nano_cpus" in security_opts:
+                    run_kwargs["nano_cpus"] = security_opts["nano_cpus"]
 
             container_id = self.dm.run(
                 job_spec.sandbox.image,

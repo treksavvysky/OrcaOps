@@ -108,6 +108,7 @@ class JobSpec(BaseModel):
     parent_job_id: Optional[str] = Field(None, description="Parent job ID for chained executions")
     tags: List[str] = Field(default_factory=list, description="Tags for categorization and filtering")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Custom key-value metadata")
+    workspace_id: Optional[str] = Field(None, description="Workspace this job belongs to")
 
     @field_validator("job_id")
     @classmethod
@@ -172,6 +173,7 @@ class RunRecord(BaseModel):
     environment: Optional[EnvironmentCapture] = None
     log_analysis: Optional[LogAnalysis] = None
     anomalies: List[Anomaly] = Field(default_factory=list)
+    workspace_id: Optional[str] = None
 
 
 class JobSubmitResponse(BaseModel):
@@ -473,4 +475,307 @@ class WorkflowCancelResponse(BaseModel):
 class WorkflowJobsResponse(BaseModel):
     workflow_id: str
     jobs: Dict[str, WorkflowJobStatus]
+    count: int
+
+
+# --- Sprint 05: Workspace & Security Models ---
+
+class WorkspaceStatus(str, Enum):
+    ACTIVE = "active"
+    SUSPENDED = "suspended"
+    ARCHIVED = "archived"
+
+
+class OwnerType(str, Enum):
+    USER = "user"
+    TEAM = "team"
+    AI_AGENT = "ai-agent"
+
+
+class ResourceLimits(BaseModel):
+    """Per-workspace resource constraints."""
+    max_concurrent_jobs: int = 10
+    max_concurrent_sandboxes: int = 5
+    max_job_duration_seconds: int = 3600
+    max_cpu_per_job: float = 4.0
+    max_memory_per_job_mb: int = 8192
+    max_artifacts_size_mb: int = 1024
+    max_storage_gb: int = 50
+    daily_job_limit: Optional[int] = None
+
+
+class WorkspaceSettings(BaseModel):
+    """Workspace-level configuration."""
+    default_cleanup_policy: str = "remove_on_completion"
+    allowed_images: List[str] = Field(default_factory=list)
+    blocked_images: List[str] = Field(default_factory=list)
+    max_job_timeout: int = 3600
+    retention_days: int = 30
+
+
+class Workspace(BaseModel):
+    """A workspace providing resource isolation."""
+    id: str
+    name: str
+    owner_type: OwnerType
+    owner_id: str
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    settings: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
+    limits: ResourceLimits = Field(default_factory=ResourceLimits)
+    status: WorkspaceStatus = WorkspaceStatus.ACTIVE
+
+    @field_validator("id")
+    @classmethod
+    def validate_workspace_id(cls, v: str) -> str:
+        if not re.match(r'^ws_[a-zA-Z0-9]+$', v):
+            raise ValueError("workspace id must start with 'ws_' followed by alphanumeric chars")
+        if len(v) > 64:
+            raise ValueError("workspace id too long (max 64 chars)")
+        return v
+
+    @field_validator("name")
+    @classmethod
+    def validate_workspace_name(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_\-]*$', v):
+            raise ValueError("name must be alphanumeric with hyphens/underscores")
+        if len(v) > 64:
+            raise ValueError("name too long (max 64 chars)")
+        return v
+
+
+class WorkspaceUsage(BaseModel):
+    """Real-time usage snapshot for a workspace."""
+    workspace_id: str
+    current_running_jobs: int = 0
+    current_running_sandboxes: int = 0
+    storage_used_mb: int = 0
+    jobs_today: int = 0
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class WorkspaceCreateRequest(BaseModel):
+    """Request body for creating a workspace."""
+    name: str = Field(..., description="Workspace name")
+    owner_type: OwnerType = Field(..., description="Owner type")
+    owner_id: str = Field(..., description="Owner identifier")
+    settings: Optional[WorkspaceSettings] = None
+    limits: Optional[ResourceLimits] = None
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    """Request body for updating a workspace."""
+    settings: Optional[WorkspaceSettings] = None
+    limits: Optional[ResourceLimits] = None
+    status: Optional[WorkspaceStatus] = None
+
+
+class WorkspaceResponse(BaseModel):
+    """Single workspace response."""
+    workspace: Workspace
+    message: str = ""
+
+
+class WorkspaceListResponse(BaseModel):
+    """List of workspaces response."""
+    workspaces: List[Workspace]
+    count: int
+
+
+# --- Sprint 05: Authentication & Authorization Models ---
+
+class Permission(str, Enum):
+    SANDBOX_READ = "sandbox:read"
+    SANDBOX_CREATE = "sandbox:create"
+    SANDBOX_START = "sandbox:start"
+    SANDBOX_STOP = "sandbox:stop"
+    SANDBOX_DELETE = "sandbox:delete"
+    JOB_READ = "job:read"
+    JOB_CREATE = "job:create"
+    JOB_CANCEL = "job:cancel"
+    WORKFLOW_READ = "workflow:read"
+    WORKFLOW_CREATE = "workflow:create"
+    WORKFLOW_CANCEL = "workflow:cancel"
+    WORKSPACE_ADMIN = "workspace:admin"
+    POLICY_ADMIN = "policy:admin"
+    AUDIT_READ = "audit:read"
+
+
+class APIKey(BaseModel):
+    """An API key bound to a workspace with specific permissions."""
+    key_id: str
+    key_hash: str
+    name: str
+    workspace_id: str
+    permissions: List[Permission]
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_used: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    revoked: bool = False
+
+    @field_validator("key_id")
+    @classmethod
+    def validate_key_id(cls, v: str) -> str:
+        if not re.match(r'^key_[a-zA-Z0-9]+$', v):
+            raise ValueError("key_id must start with 'key_' followed by alphanumeric chars")
+        return v
+
+
+class APIKeyCreateRequest(BaseModel):
+    """Request body for creating an API key."""
+    name: str = Field(..., description="Human-readable name for the key")
+    permissions: Optional[List[Permission]] = None
+    role: Optional[str] = Field(None, description="Role template: admin, developer, viewer, ci")
+    expires_in_days: Optional[int] = Field(None, ge=1, le=365)
+
+
+class APIKeyCreateResponse(BaseModel):
+    """Response containing the newly created key (plain key shown once)."""
+    key_id: str
+    plain_key: str
+    name: str
+    workspace_id: str
+    permissions: List[Permission]
+    expires_at: Optional[datetime] = None
+    message: str = "Store this key securely — it will not be shown again."
+
+
+class APIKeyResponse(BaseModel):
+    """API key info without the hash."""
+    key_id: str
+    name: str
+    workspace_id: str
+    permissions: List[Permission]
+    created_at: datetime
+    last_used: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    revoked: bool = False
+
+
+class APIKeyListResponse(BaseModel):
+    """List of API keys."""
+    keys: List[APIKeyResponse]
+    count: int
+
+
+# --- Sprint 05: Security Policy Models ---
+
+class PolicyResult(BaseModel):
+    """Result of a policy validation check."""
+    allowed: bool
+    violations: List[str] = Field(default_factory=list)
+    policy_name: str = ""
+
+
+class ImagePolicy(BaseModel):
+    """Image allow/block list policy."""
+    allowed_images: List[str] = Field(default_factory=list)
+    blocked_images: List[str] = Field(default_factory=list)
+    require_digest: bool = False
+
+
+class CommandPolicy(BaseModel):
+    """Command blocking policy."""
+    blocked_commands: List[str] = Field(default_factory=list)
+    blocked_patterns: List[str] = Field(default_factory=list)
+
+
+class NetworkPolicy(BaseModel):
+    """Network access policy."""
+    allow_internet: bool = True
+    allowed_hosts: List[str] = Field(default_factory=list)
+    blocked_ports: List[int] = Field(default_factory=list)
+
+
+class SecurityPolicy(BaseModel):
+    """Combined security policy for a workspace."""
+    image_policy: ImagePolicy = Field(default_factory=ImagePolicy)
+    command_policy: CommandPolicy = Field(default_factory=CommandPolicy)
+    network_policy: NetworkPolicy = Field(default_factory=NetworkPolicy)
+    container_security: Dict[str, Any] = Field(default_factory=lambda: {
+        "cap_drop": ["ALL"],
+        "security_opt": ["no-new-privileges:true"],
+        "read_only": False,
+    })
+
+
+# --- Sprint 05: Audit Logging Models ---
+
+class AuditAction(str, Enum):
+    JOB_CREATED = "job.created"
+    JOB_CANCELLED = "job.cancelled"
+    JOB_COMPLETED = "job.completed"
+    WORKFLOW_CREATED = "workflow.created"
+    WORKFLOW_CANCELLED = "workflow.cancelled"
+    SANDBOX_CREATED = "sandbox.created"
+    KEY_CREATED = "key.created"
+    KEY_REVOKED = "key.revoked"
+    WORKSPACE_CREATED = "workspace.created"
+    WORKSPACE_UPDATED = "workspace.updated"
+    WORKSPACE_ARCHIVED = "workspace.archived"
+    AUTH_SUCCESS = "auth.success"
+    AUTH_FAILURE = "auth.failure"
+    POLICY_VIOLATION = "policy.violation"
+    SESSION_STARTED = "session.started"
+    SESSION_EXPIRED = "session.expired"
+
+
+class AuditOutcome(str, Enum):
+    SUCCESS = "success"
+    DENIED = "denied"
+    ERROR = "error"
+
+
+class AuditEvent(BaseModel):
+    """A single audit log entry."""
+    event_id: str
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    workspace_id: str
+    actor_type: str
+    actor_id: str
+    action: AuditAction
+    resource_type: str
+    resource_id: str
+    details: Dict[str, Any] = Field(default_factory=dict)
+    outcome: AuditOutcome
+    ip_address: Optional[str] = None
+
+
+class AuditQueryResponse(BaseModel):
+    """Response for audit log queries."""
+    events: List[AuditEvent]
+    total: int
+    offset: int
+    limit: int
+
+
+# --- Sprint 05: Agent Session Models ---
+
+class SessionStatus(str, Enum):
+    ACTIVE = "active"
+    IDLE = "idle"
+    EXPIRED = "expired"
+
+
+class AgentSession(BaseModel):
+    """An active MCP agent session with resource tracking."""
+    session_id: str
+    agent_type: str
+    workspace_id: str
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_activity: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    status: SessionStatus = SessionStatus.ACTIVE
+    resources_created: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionResponse(BaseModel):
+    """Single session response."""
+    session: AgentSession
+    message: str = ""
+
+
+class SessionListResponse(BaseModel):
+    """List of sessions."""
+    sessions: List[AgentSession]
     count: int

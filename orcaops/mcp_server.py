@@ -100,6 +100,17 @@ def _workflow_store():
     return _ws
 
 
+_sm = None
+
+
+def _session_manager():
+    global _sm
+    if _sm is None:
+        from orcaops.session_manager import SessionManager
+        _sm = SessionManager()
+    return _sm
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -1243,6 +1254,294 @@ def orcaops_list_workflows(
         return _error("INVALID_STATUS", f"Invalid status. Valid values: {valid}")
     except Exception as exc:
         return _error("LIST_WORKFLOWS_ERROR", str(exc))
+
+
+# ===================================================================
+# Workspace Management Tools
+# ===================================================================
+
+_wr = None
+_km = None
+_al = None
+_as_ = None
+
+
+def _workspace_registry():
+    global _wr
+    if _wr is None:
+        from orcaops.workspace import WorkspaceRegistry
+        _wr = WorkspaceRegistry()
+    return _wr
+
+
+def _key_manager_mcp():
+    global _km
+    if _km is None:
+        from orcaops.auth import KeyManager
+        _km = KeyManager()
+    return _km
+
+
+def _audit_logger():
+    global _al
+    if _al is None:
+        from orcaops.audit import AuditLogger
+        _al = AuditLogger()
+    return _al
+
+
+def _audit_store():
+    global _as_
+    if _as_ is None:
+        from orcaops.audit import AuditStore
+        _as_ = AuditStore()
+    return _as_
+
+
+@server.tool()
+def orcaops_create_workspace(
+    name: str,
+    owner_type: str = "user",
+    owner_id: str = "default",
+) -> str:
+    """Create a new workspace for resource isolation."""
+    try:
+        from orcaops.schemas import OwnerType
+        ot = OwnerType(owner_type)
+        ws = _workspace_registry().create_workspace(name, ot, owner_id)
+        return _success(
+            workspace_id=ws.id,
+            name=ws.name,
+            owner_type=ws.owner_type.value,
+            owner_id=ws.owner_id,
+            status=ws.status.value,
+        )
+    except ValueError as e:
+        return _error("VALIDATION_ERROR", str(e))
+    except Exception as exc:
+        return _error("CREATE_WORKSPACE_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_list_workspaces(status: Optional[str] = None) -> str:
+    """List all workspaces with optional status filter."""
+    try:
+        ws_status = None
+        if status:
+            from orcaops.schemas import WorkspaceStatus as WS
+            ws_status = WS(status)
+        workspaces = _workspace_registry().list_workspaces(status=ws_status)
+        return _success(
+            workspaces=[
+                {
+                    "id": ws.id,
+                    "name": ws.name,
+                    "owner": f"{ws.owner_type.value}/{ws.owner_id}",
+                    "status": ws.status.value,
+                }
+                for ws in workspaces
+            ],
+            count=len(workspaces),
+        )
+    except Exception as exc:
+        return _error("LIST_WORKSPACES_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_get_workspace(workspace_id: str) -> str:
+    """Get workspace details including settings and limits."""
+    try:
+        ws = _workspace_registry().get_workspace(workspace_id)
+        if not ws:
+            return _error("NOT_FOUND", f"Workspace '{workspace_id}' not found.")
+        return _success(
+            workspace_id=ws.id,
+            name=ws.name,
+            owner_type=ws.owner_type.value,
+            owner_id=ws.owner_id,
+            status=ws.status.value,
+            settings=ws.settings.model_dump(),
+            limits=ws.limits.model_dump(),
+            created_at=ws.created_at.isoformat(),
+        )
+    except Exception as exc:
+        return _error("GET_WORKSPACE_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_create_api_key(
+    workspace_id: str,
+    name: str = "default",
+    role: str = "admin",
+) -> str:
+    """Generate an API key for a workspace. Available roles: admin, developer, viewer, ci."""
+    try:
+        from orcaops.auth import ROLE_TEMPLATES
+        if role not in ROLE_TEMPLATES:
+            return _error("VALIDATION_ERROR", f"Invalid role. Choose from: {', '.join(ROLE_TEMPLATES.keys())}")
+        permissions = ROLE_TEMPLATES[role]
+        plain_key, api_key = _key_manager_mcp().generate_key(workspace_id, name, permissions)
+        return _success(
+            key_id=api_key.key_id,
+            plain_key=plain_key,
+            name=api_key.name,
+            workspace_id=workspace_id,
+            role=role,
+            permission_count=len(permissions),
+            message="Store this key securely — it will not be shown again.",
+        )
+    except Exception as exc:
+        return _error("CREATE_KEY_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_revoke_api_key(workspace_id: str, key_id: str) -> str:
+    """Revoke an API key."""
+    try:
+        if _key_manager_mcp().revoke_key(workspace_id, key_id):
+            return _success(key_id=key_id, revoked=True, message="API key revoked.")
+        return _error("NOT_FOUND", f"Key '{key_id}' not found.")
+    except Exception as exc:
+        return _error("REVOKE_KEY_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_query_audit(
+    workspace_id: Optional[str] = None,
+    action: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> str:
+    """Query the audit log with optional filters."""
+    try:
+        audit_action = None
+        if action:
+            from orcaops.schemas import AuditAction
+            audit_action = AuditAction(action)
+        events, total = _audit_store().query(
+            workspace_id=workspace_id,
+            action=audit_action,
+            limit=limit,
+            offset=offset,
+        )
+        return _success(
+            events=[
+                {
+                    "event_id": e.event_id,
+                    "timestamp": e.timestamp.isoformat(),
+                    "workspace_id": e.workspace_id,
+                    "action": e.action.value,
+                    "resource": f"{e.resource_type}/{e.resource_id}",
+                    "outcome": e.outcome.value,
+                    "actor": f"{e.actor_type}/{e.actor_id}",
+                }
+                for e in events
+            ],
+            total=total,
+        )
+    except ValueError as e:
+        return _error("VALIDATION_ERROR", str(e))
+    except Exception as exc:
+        return _error("QUERY_AUDIT_ERROR", str(exc))
+
+
+# ===================================================================
+# Session Management Tools
+# ===================================================================
+
+
+@server.tool()
+def orcaops_create_session(
+    agent_type: str,
+    workspace_id: str = "ws_default",
+    metadata: Optional[Dict] = None,
+) -> str:
+    """Create a new agent session for tracking resources and activity."""
+    try:
+        sm = _session_manager()
+        session = sm.create_session(agent_type, workspace_id, metadata=metadata)
+        return _success(
+            session_id=session.session_id,
+            agent_type=session.agent_type,
+            workspace_id=session.workspace_id,
+            status=session.status.value,
+            started_at=session.started_at.isoformat(),
+        )
+    except Exception as exc:
+        return _error("CREATE_SESSION_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_get_session(session_id: str) -> str:
+    """Get details of an agent session."""
+    try:
+        sm = _session_manager()
+        session = sm.get_session(session_id)
+        if not session:
+            return _error("NOT_FOUND", f"Session '{session_id}' not found.")
+        return _success(
+            session_id=session.session_id,
+            agent_type=session.agent_type,
+            workspace_id=session.workspace_id,
+            status=session.status.value,
+            started_at=session.started_at.isoformat(),
+            last_activity=session.last_activity.isoformat(),
+            resources_created=session.resources_created,
+            metadata=session.metadata,
+        )
+    except Exception as exc:
+        return _error("GET_SESSION_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_list_sessions(
+    workspace_id: Optional[str] = None,
+    status: Optional[str] = None,
+) -> str:
+    """List agent sessions with optional workspace and status filters."""
+    try:
+        from orcaops.schemas import SessionStatus
+        sm = _session_manager()
+        session_status = None
+        if status:
+            session_status = SessionStatus(status)
+        sessions = sm.list_sessions(workspace_id=workspace_id, status=session_status)
+        return _success(
+            sessions=[
+                {
+                    "session_id": s.session_id,
+                    "agent_type": s.agent_type,
+                    "workspace_id": s.workspace_id,
+                    "status": s.status.value,
+                    "started_at": s.started_at.isoformat(),
+                    "resource_count": len(s.resources_created),
+                }
+                for s in sessions
+            ],
+            count=len(sessions),
+        )
+    except ValueError:
+        return _error("INVALID_STATUS", "Invalid status. Valid: active, idle, expired")
+    except Exception as exc:
+        return _error("LIST_SESSIONS_ERROR", str(exc))
+
+
+@server.tool()
+def orcaops_end_session(session_id: str) -> str:
+    """End an agent session."""
+    try:
+        sm = _session_manager()
+        session = sm.end_session(session_id)
+        if not session:
+            return _error("NOT_FOUND", f"Session '{session_id}' not found.")
+        return _success(
+            session_id=session.session_id,
+            status=session.status.value,
+            resources_created=session.resources_created,
+            message="Session ended.",
+        )
+    except Exception as exc:
+        return _error("END_SESSION_ERROR", str(exc))
 
 
 # ===================================================================
