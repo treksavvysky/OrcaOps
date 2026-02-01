@@ -1,0 +1,59 @@
+name: ci-pipeline
+description: Build, test, and deploy application
+
+env:
+  APP_VERSION: "1.0.0"
+  DEPLOY_ENV: staging
+
+jobs:
+  build:
+    image: python:3.11-slim
+    commands:
+      - pip install -r requirements.txt
+      - python setup.py bdist_wheel
+    artifacts:
+      - /app/dist/*.whl
+    timeout: 300
+
+  test-unit:
+    image: python:3.11-slim
+    requires: [build]
+    commands:
+      - pip install -r requirements-test.txt
+      - pytest tests/unit -v --tb=short
+    timeout: 300
+
+  test-integration:
+    image: python:3.11-slim
+    requires: [build]
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: testdb
+        health_check:
+          interval: 5s
+          timeout: 10s
+          retries: 5
+      redis:
+        image: redis:7
+    commands:
+      - pip install -r requirements-test.txt
+      - pytest tests/integration -v
+    timeout: 600
+
+  deploy:
+    image: alpine:latest
+    requires: [test-unit, test-integration]
+    if: "${{ env.DEPLOY_ENV == 'staging' }}"
+    commands:
+      - echo "Deploying version $APP_VERSION to $DEPLOY_ENV"
+    timeout: 120
+
+  notify:
+    image: alpine:latest
+    requires: [deploy]
+    on_complete: always
+    commands:
+      - echo "Pipeline complete"

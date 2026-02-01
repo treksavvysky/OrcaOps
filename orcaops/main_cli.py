@@ -14,6 +14,9 @@ CLICommands.add_commands(app)
 from orcaops.cli_jobs import JobCLI
 JobCLI.add_commands(app)
 
+from orcaops.cli_workflows import WorkflowCLI
+WorkflowCLI.add_commands(app)
+
 @app.command("version", help="📦 Show OrcaOps version information")
 def show_version():
     """Display version and system information"""

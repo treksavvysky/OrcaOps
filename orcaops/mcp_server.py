@@ -21,6 +21,7 @@ from orcaops.schemas import (
     JobCommand,
     JobStatus,
     RunRecord,
+    WorkflowStatus,
 )
 
 server = FastMCP(
@@ -47,6 +48,8 @@ _jm = None
 _rs = None
 _dm = None
 _registry = None
+_wm = None
+_ws = None
 
 
 def _job_manager():
@@ -79,6 +82,22 @@ def _sandbox_registry():
         from orcaops.sandbox_registry import get_registry
         _registry = get_registry()
     return _registry
+
+
+def _workflow_manager():
+    global _wm
+    if _wm is None:
+        from orcaops.workflow_manager import WorkflowManager
+        _wm = WorkflowManager(job_manager=_job_manager())
+    return _wm
+
+
+def _workflow_store():
+    global _ws
+    if _ws is None:
+        from orcaops.workflow_store import WorkflowStore
+        _ws = WorkflowStore()
+    return _ws
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1045,204 @@ def orcaops_cleanup_runs(older_than_days: int = 30) -> str:
         )
     except Exception as exc:
         return _error("CLEANUP_RUNS_ERROR", str(exc))
+
+
+# ===================================================================
+# Workflow Tools
+# ===================================================================
+
+_TERMINAL_WF_STATUSES = {
+    WorkflowStatus.SUCCESS,
+    WorkflowStatus.FAILED,
+    WorkflowStatus.CANCELLED,
+    WorkflowStatus.PARTIAL,
+}
+
+
+@server.tool(
+    name="orcaops_run_workflow",
+    description=(
+        "Submit a workflow from a spec dict and wait for completion. "
+        "Returns the final workflow record with all job statuses."
+    ),
+)
+def orcaops_run_workflow(
+    spec: dict,
+    workflow_id: Optional[str] = None,
+    timeout: int = 3600,
+) -> str:
+    """Submit a workflow and poll until completion."""
+    try:
+        from orcaops.workflow_schema import parse_workflow_spec, WorkflowValidationError
+
+        try:
+            workflow_spec = parse_workflow_spec(spec)
+        except (WorkflowValidationError, ValueError) as e:
+            return _error("VALIDATION_ERROR", str(e))
+
+        wm = _workflow_manager()
+        wf_id = workflow_id or f"mcp-wf-{uuid.uuid4().hex[:12]}"
+        record = wm.submit_workflow(workflow_spec, workflow_id=wf_id, triggered_by="mcp")
+
+        # Poll until terminal status
+        deadline = time.time() + timeout + 30
+        while time.time() < deadline:
+            record = wm.get_workflow(wf_id)
+            if record and record.status in _TERMINAL_WF_STATUSES:
+                return _success(
+                    workflow_id=wf_id,
+                    spec_name=record.spec_name,
+                    status=record.status.value,
+                    job_statuses={
+                        name: {
+                            "status": js.status.value,
+                            "job_id": js.job_id,
+                            "error": js.error,
+                        }
+                        for name, js in record.job_statuses.items()
+                    },
+                    error=record.error,
+                )
+            time.sleep(1)
+
+        return _error(
+            "WORKFLOW_TIMEOUT",
+            f"Workflow '{wf_id}' did not complete within {timeout}s.",
+            "Use orcaops_get_workflow_status to check progress, or orcaops_cancel_workflow to cancel.",
+        )
+    except ValueError as exc:
+        return _error("VALIDATION_ERROR", str(exc))
+    except Exception as exc:
+        return _error("RUN_WORKFLOW_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_submit_workflow",
+    description=(
+        "Submit a workflow for execution without waiting for completion. "
+        "Returns immediately with the workflow_id. Use orcaops_get_workflow_status to poll."
+    ),
+)
+def orcaops_submit_workflow(
+    spec: dict,
+    workflow_id: Optional[str] = None,
+) -> str:
+    """Submit a workflow without waiting. Returns workflow_id for later polling."""
+    try:
+        from orcaops.workflow_schema import parse_workflow_spec, WorkflowValidationError
+
+        try:
+            workflow_spec = parse_workflow_spec(spec)
+        except (WorkflowValidationError, ValueError) as e:
+            return _error("VALIDATION_ERROR", str(e))
+
+        wm = _workflow_manager()
+        wf_id = workflow_id or f"mcp-wf-{uuid.uuid4().hex[:12]}"
+        record = wm.submit_workflow(workflow_spec, workflow_id=wf_id, triggered_by="mcp")
+        return _success(
+            workflow_id=record.workflow_id,
+            status=record.status.value,
+            message="Workflow submitted. Use orcaops_get_workflow_status to check progress.",
+        )
+    except ValueError as exc:
+        return _error("VALIDATION_ERROR", str(exc))
+    except Exception as exc:
+        return _error("SUBMIT_WORKFLOW_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_get_workflow_status",
+    description="Get the current status and job details of a workflow by its ID.",
+)
+def orcaops_get_workflow_status(workflow_id: str) -> str:
+    """Check status of a submitted workflow."""
+    try:
+        wm = _workflow_manager()
+        record = wm.get_workflow(workflow_id)
+        if not record:
+            ws = _workflow_store()
+            record = ws.get_workflow(workflow_id)
+        if not record:
+            return _error(
+                "WORKFLOW_NOT_FOUND",
+                f"Workflow '{workflow_id}' not found.",
+                "Use orcaops_list_workflows to see available workflows.",
+            )
+        data = json.loads(record.model_dump_json())
+        return _success(**data)
+    except Exception as exc:
+        return _error("GET_WORKFLOW_STATUS_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_cancel_workflow",
+    description="Cancel a running or pending workflow.",
+)
+def orcaops_cancel_workflow(workflow_id: str) -> str:
+    """Cancel a workflow by ID."""
+    try:
+        wm = _workflow_manager()
+        cancelled, record = wm.cancel_workflow(workflow_id)
+        if not cancelled:
+            return _error(
+                "WORKFLOW_NOT_FOUND",
+                f"Workflow '{workflow_id}' not found or already completed.",
+                "Use orcaops_list_workflows to see active workflows.",
+            )
+        return _success(
+            workflow_id=workflow_id,
+            status=record.status.value,
+            message=f"Workflow '{workflow_id}' cancelled.",
+        )
+    except Exception as exc:
+        return _error("CANCEL_WORKFLOW_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_list_workflows",
+    description="List workflows with optional status filter.",
+)
+def orcaops_list_workflows(
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> str:
+    """List workflows from memory and disk."""
+    try:
+        wm = _workflow_manager()
+        ws = _workflow_store()
+
+        status_filter = WorkflowStatus(status) if status else None
+        active = wm.list_workflows(status=status_filter)
+        historical, total = ws.list_workflows(status=status_filter, limit=limit)
+
+        active_ids = {r.workflow_id for r in active}
+        combined = list(active)
+        for r in historical:
+            if r.workflow_id not in active_ids:
+                combined.append(r)
+
+        combined.sort(key=lambda r: r.created_at, reverse=True)
+        sliced = combined[:limit]
+
+        return _success(
+            workflows=[
+                {
+                    "workflow_id": r.workflow_id,
+                    "spec_name": r.spec_name,
+                    "status": r.status.value,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "job_count": len(r.job_statuses),
+                    "triggered_by": r.triggered_by,
+                }
+                for r in sliced
+            ],
+            count=len(combined),
+        )
+    except ValueError:
+        valid = [s.value for s in WorkflowStatus]
+        return _error("INVALID_STATUS", f"Invalid status. Valid values: {valid}")
+    except Exception as exc:
+        return _error("LIST_WORKFLOWS_ERROR", str(exc))
 
 
 # ===================================================================

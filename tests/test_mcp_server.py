@@ -39,6 +39,8 @@ def reset_singletons():
     mod._rs = None
     mod._dm = None
     mod._registry = None
+    mod._wm = None
+    mod._ws = None
     yield
 
 

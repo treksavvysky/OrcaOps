@@ -18,11 +18,11 @@
 ### Tasks
 
 #### 1.1 Workflow Spec Schema
-- [ ] Create `WorkflowSpec` Pydantic model
-- [ ] Define job dependencies (`requires`, `after`)
-- [ ] Support conditional execution (`if`, `unless`)
-- [ ] Enable parallel job groups
-- [ ] Add workflow-level settings (timeout, cleanup)
+- [x] Create `WorkflowSpec` Pydantic model
+- [x] Define job dependencies (`requires`, `after`)
+- [x] Support conditional execution (`if`, `unless`)
+- [x] Enable parallel job groups
+- [x] Add workflow-level settings (timeout, cleanup)
 
 ```yaml
 # Example: workflows/ci-pipeline.yaml
@@ -103,10 +103,10 @@ class WorkflowSpec(BaseModel):
 ```
 
 #### 1.3 Workflow Validation
-- [ ] Detect circular dependencies
-- [ ] Validate job references exist
-- [ ] Check for unreachable jobs
-- [ ] Validate condition syntax
+- [x] Detect circular dependencies
+- [x] Validate job references exist
+- [x] Check for unreachable jobs
+- [x] Validate condition syntax
 
 ### Deliverables
 - `orcaops/workflow_schema.py` with models
@@ -125,10 +125,10 @@ class WorkflowSpec(BaseModel):
 ### Tasks
 
 #### 2.1 Dependency Graph
-- [ ] Build DAG from workflow spec
-- [ ] Calculate execution order
-- [ ] Identify parallelizable groups
-- [ ] Detect critical path
+- [x] Build DAG from workflow spec
+- [x] Calculate execution order
+- [x] Identify parallelizable groups
+- [x] Detect critical path
 
 ```python
 class WorkflowDAG:
@@ -144,11 +144,11 @@ class WorkflowDAG:
 ```
 
 #### 2.2 Workflow Runner
-- [ ] Create `WorkflowRunner` class
-- [ ] Implement job scheduling logic
-- [ ] Handle parallel job execution with asyncio
-- [ ] Pass artifacts between jobs
-- [ ] Evaluate conditions before execution
+- [x] Create `WorkflowRunner` class
+- [x] Implement job scheduling logic
+- [x] Handle parallel job execution with asyncio
+- [x] Pass artifacts between jobs
+- [x] Evaluate conditions before execution
 
 ```python
 class WorkflowRunner:
@@ -163,10 +163,10 @@ class WorkflowRunner:
 ```
 
 #### 2.3 Workflow Context
-- [ ] Share environment variables across jobs
-- [ ] Pass outputs from previous jobs
-- [ ] Track workflow-level state
-- [ ] Support variable interpolation
+- [x] Share environment variables across jobs
+- [x] Pass outputs from previous jobs
+- [x] Track workflow-level state
+- [x] Support variable interpolation
 
 ```python
 class WorkflowContext:
@@ -203,10 +203,10 @@ PENDING -> RUNNING -> SUCCESS
                    -> PARTIAL (some jobs succeeded)
 ```
 
-- [ ] Implement state transitions
-- [ ] Track per-job status within workflow
-- [ ] Handle workflow-level timeout
-- [ ] Support cancellation
+- [x] Implement state transitions
+- [x] Track per-job status within workflow
+- [x] Handle workflow-level timeout
+- [x] Support cancellation
 
 #### 3.2 Workflow Record
 ```python
@@ -223,10 +223,10 @@ class WorkflowRecord(BaseModel):
 ```
 
 #### 3.3 Persistence
-- [ ] Store in `~/.orcaops/workflows/{workflow_id}.json`
-- [ ] Update state as jobs complete
-- [ ] Link to individual job run records
-- [ ] Support workflow run history queries
+- [x] Store in `~/.orcaops/workflows/{workflow_id}.json`
+- [x] Update state as jobs complete
+- [x] Link to individual job run records
+- [x] Support workflow run history queries
 
 ### Deliverables
 - Workflow state management
@@ -245,23 +245,23 @@ class WorkflowRecord(BaseModel):
 ### Tasks
 
 #### 4.1 Workflow API
-- [ ] `POST /orcaops/workflows` - Start workflow from spec
-- [ ] `GET /orcaops/workflows/{id}` - Get workflow status
-- [ ] `GET /orcaops/workflows/{id}/jobs` - List jobs in workflow
-- [ ] `POST /orcaops/workflows/{id}/cancel` - Cancel workflow
-- [ ] `GET /orcaops/workflows` - List workflow runs
+- [x] `POST /orcaops/workflows` - Start workflow from spec
+- [x] `GET /orcaops/workflows/{id}` - Get workflow status
+- [x] `GET /orcaops/workflows/{id}/jobs` - List jobs in workflow
+- [x] `POST /orcaops/workflows/{id}/cancel` - Cancel workflow
+- [x] `GET /orcaops/workflows` - List workflow runs
 
 #### 4.2 Workflow CLI
-- [ ] `orcaops workflow run <spec.yaml>` - Run workflow
-- [ ] `orcaops workflow status <id>` - Check status
-- [ ] `orcaops workflow logs <id>` - Combined logs
-- [ ] `orcaops workflow cancel <id>` - Cancel
-- [ ] `orcaops workflow list` - List runs
+- [x] `orcaops workflow run <spec.yaml>` - Run workflow
+- [x] `orcaops workflow status <id>` - Check status
+- [x] `orcaops workflow logs <id>` - Combined logs
+- [x] `orcaops workflow cancel <id>` - Cancel
+- [x] `orcaops workflow list` - List runs
 
 #### 4.3 Workflow MCP Tools
-- [ ] `orcaops_run_workflow` - Start workflow
-- [ ] `orcaops_get_workflow_status` - Check status
-- [ ] `orcaops_cancel_workflow` - Cancel workflow
+- [x] `orcaops_run_workflow` - Start workflow
+- [x] `orcaops_get_workflow_status` - Check status
+- [x] `orcaops_cancel_workflow` - Cancel workflow
 
 ### Deliverables
 - Workflow API endpoints
@@ -298,22 +298,22 @@ jobs:
         image: redis:7
 ```
 
-- [ ] Parse service definitions
-- [ ] Start services before job
-- [ ] Wait for health checks
-- [ ] Inject service URLs into job environment
-- [ ] Clean up services after job
+- [x] Parse service definitions
+- [x] Start services before job
+- [x] Wait for health checks
+- [x] Inject service URLs into job environment
+- [x] Clean up services after job
 
 #### 5.2 Service Networking
-- [ ] Create workflow-specific Docker network
-- [ ] Connect services and job containers
-- [ ] Enable service discovery by name
-- [ ] Isolate from other workflows
+- [x] Create workflow-specific Docker network
+- [x] Connect services and job containers
+- [x] Enable service discovery by name
+- [x] Isolate from other workflows
 
 #### 5.3 Service Logs
-- [ ] Capture service logs
-- [ ] Include in job artifacts
-- [ ] Surface errors in job summary
+- [x] Capture service logs
+- [x] Include in job artifacts
+- [x] Surface errors in job summary
 
 ### Deliverables
 - Service container management
@@ -346,16 +346,16 @@ jobs:
       - pytest tests/
 ```
 
-- [ ] Parse matrix configuration
-- [ ] Generate job variants
-- [ ] Handle exclude/include rules
-- [ ] Limit concurrency
+- [x] Parse matrix configuration
+- [x] Generate job variants
+- [x] Handle exclude/include rules
+- [x] Limit concurrency
 
 #### 6.2 Matrix Execution
-- [ ] Expand matrix to individual jobs
-- [ ] Run matrix jobs in parallel
-- [ ] Aggregate results
-- [ ] Report per-variant status
+- [x] Expand matrix to individual jobs
+- [x] Run matrix jobs in parallel
+- [x] Aggregate results
+- [x] Report per-variant status
 
 #### 6.3 Matrix Results
 ```python
@@ -375,14 +375,14 @@ class MatrixResult(BaseModel):
 
 ## Success Criteria
 
-- [ ] Can define multi-job workflows in YAML
-- [ ] Jobs run in correct dependency order
-- [ ] Parallel jobs execute concurrently
-- [ ] Conditions control job execution
-- [ ] Services start and are accessible
-- [ ] Matrix builds expand and run
-- [ ] Workflow status visible via API/CLI/MCP
-- [ ] Can resume failed workflows (future enhancement)
+- [x] Can define multi-job workflows in YAML
+- [x] Jobs run in correct dependency order
+- [x] Parallel jobs execute concurrently
+- [x] Conditions control job execution
+- [x] Services start and are accessible
+- [x] Matrix builds expand and run
+- [x] Workflow status visible via API/CLI/MCP
+- [x] Can resume failed workflows (future enhancement)
 
 ---
 

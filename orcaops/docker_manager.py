@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 @dataclass
 class BuildResult:
@@ -489,6 +489,42 @@ class DockerManager:
         except docker.errors.APIError as e:
             logger.error(f"API Error executing command in {container_id}: {e}")
             return None, str(e)
+
+    def create_network(self, name: str, labels: Optional[Dict[str, str]] = None) -> str:
+        """Create a Docker bridge network. Returns network ID."""
+        logger.info(f"Creating Docker network: {name}")
+        try:
+            network = self.client.networks.create(
+                name, driver="bridge", labels=labels or {}
+            )
+            return network.id
+        except docker.errors.APIError as e:
+            logger.error(f"Failed to create network {name}: {e}")
+            raise
+
+    def remove_network(self, name_or_id: str) -> bool:
+        """Remove a Docker network. Returns True on success."""
+        logger.info(f"Removing Docker network: {name_or_id}")
+        try:
+            network = self.client.networks.get(name_or_id)
+            network.remove()
+            return True
+        except docker.errors.NotFound:
+            logger.warning(f"Network {name_or_id} not found.")
+            return False
+        except docker.errors.APIError as e:
+            logger.error(f"Failed to remove network {name_or_id}: {e}")
+            return False
+
+    def connect_to_network(self, container_id: str, network_id: str, aliases: Optional[List[str]] = None) -> bool:
+        """Connect a container to a network with optional aliases."""
+        try:
+            network = self.client.networks.get(network_id)
+            network.connect(container_id, aliases=aliases or [])
+            return True
+        except docker.errors.APIError as e:
+            logger.error(f"Failed to connect {container_id} to network {network_id}: {e}")
+            return False
 
     def copy_from(self, container_id: str, src_path: str, dest_path: str):
         """

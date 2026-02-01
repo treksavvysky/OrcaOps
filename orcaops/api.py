@@ -41,14 +41,26 @@ from orcaops.schemas import (
     RunCleanupResponse,
     JobSummaryResponse,
     MetricsResponse,
+    WorkflowStatus,
+    WorkflowSubmitRequest,
+    WorkflowSubmitResponse,
+    WorkflowStatusResponse,
+    WorkflowListResponse,
+    WorkflowCancelResponse,
+    WorkflowJobsResponse,
 )
 from orcaops.log_analyzer import SummaryGenerator
 from orcaops.metrics import MetricsAggregator
+from orcaops.workflow_manager import WorkflowManager
+from orcaops.workflow_store import WorkflowStore
+from orcaops.workflow_schema import WorkflowValidationError
 
 router = APIRouter()
 docker_manager = DockerManager()
 job_manager = JobManager()
 run_store = RunStore()
+workflow_manager = WorkflowManager(job_manager=job_manager)
+workflow_store = WorkflowStore()
 
 
 # Container Management Endpoints
@@ -811,3 +823,73 @@ async def delete_run(job_id: str):
         deleted=True,
         message=f"Run '{job_id}' and its artifacts deleted.",
     )
+
+
+# --- Workflow Endpoints ---
+
+@router.post("/workflows", response_model=WorkflowSubmitResponse, summary="Submit a workflow")
+async def submit_workflow(request: WorkflowSubmitRequest):
+    """Submit a workflow for execution."""
+    try:
+        record = workflow_manager.submit_workflow(
+            request.spec, triggered_by=request.triggered_by or "api"
+        )
+    except (ValueError, WorkflowValidationError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return WorkflowSubmitResponse(
+        workflow_id=record.workflow_id,
+        status=record.status,
+        created_at=record.created_at,
+        message="Workflow accepted and queued for execution.",
+    )
+
+
+@router.get("/workflows/{workflow_id}", response_model=WorkflowStatusResponse, summary="Get workflow status")
+async def get_workflow_status(workflow_id: str):
+    """Get the current status and details of a workflow."""
+    record = workflow_manager.get_workflow(workflow_id)
+    if not record:
+        record = workflow_store.get_workflow(workflow_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+    return WorkflowStatusResponse(workflow_id=workflow_id, status=record.status, record=record)
+
+
+@router.get("/workflows/{workflow_id}/jobs", response_model=WorkflowJobsResponse, summary="List workflow jobs")
+async def get_workflow_jobs(workflow_id: str):
+    """List the jobs within a workflow and their statuses."""
+    record = workflow_manager.get_workflow(workflow_id)
+    if not record:
+        record = workflow_store.get_workflow(workflow_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found.")
+    return WorkflowJobsResponse(
+        workflow_id=workflow_id, jobs=record.job_statuses, count=len(record.job_statuses)
+    )
+
+
+@router.post("/workflows/{workflow_id}/cancel", response_model=WorkflowCancelResponse, summary="Cancel a workflow")
+async def cancel_workflow(workflow_id: str):
+    """Cancel a running workflow."""
+    cancelled, record = workflow_manager.cancel_workflow(workflow_id)
+    if not cancelled or not record:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found or already completed.")
+    return WorkflowCancelResponse(
+        workflow_id=workflow_id, status=record.status, message="Workflow cancellation requested."
+    )
+
+
+@router.get("/workflows", response_model=WorkflowListResponse, summary="List workflows")
+async def list_workflows(
+    status: Optional[WorkflowStatus] = Query(None, description="Filter by workflow status"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    limit: int = Query(50, ge=1, le=200, description="Pagination limit"),
+):
+    """List workflow runs with optional status filter."""
+    active = workflow_manager.list_workflows(status=status)
+    historical, _ = workflow_store.list_workflows(status=status, limit=limit)
+    active_ids = {r.workflow_id for r in active}
+    combined = list(active) + [h for h in historical if h.workflow_id not in active_ids]
+    combined.sort(key=lambda r: r.created_at, reverse=True)
+    sliced = combined[offset:offset + limit]
+    return WorkflowListResponse(workflows=sliced, count=len(combined))

@@ -91,6 +91,13 @@ class JobRunner:
             )
             record.sandbox_id = container_id
 
+            # Connect to network if specified
+            if job_spec.sandbox.network_name:
+                try:
+                    self.dm.connect_to_network(container_id, job_spec.sandbox.network_name)
+                except Exception as e:
+                    logger.warning(f"Failed to connect to network: {e}")
+
             # 2. Run Commands
             for cmd in job_spec.commands:
                 logger.info(f"Running step: {cmd.command}")

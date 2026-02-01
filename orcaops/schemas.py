@@ -85,6 +85,7 @@ class SandboxSpec(BaseModel):
     image: str = Field(..., description="Docker image reference (should be pinned)")
     env: Dict[str, str] = Field(default_factory=dict, description="Environment variables")
     resources: Dict[str, Any] = Field(default_factory=dict, description="Resource limits (e.g. cpu, memory)")
+    network_name: Optional[str] = Field(None, description="Docker network to connect the container to")
 
     @field_validator("image")
     @classmethod
@@ -336,3 +337,140 @@ class MetricsResponse(BaseModel):
     by_image: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
     period_start: Optional[datetime] = None
     period_end: Optional[datetime] = None
+
+
+# --- Sprint 04: Workflow Models ---
+
+class WorkflowStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    PARTIAL = "partial"
+
+
+class ServiceDefinition(BaseModel):
+    """A service container to run alongside a workflow job."""
+    image: str
+    env: Dict[str, str] = Field(default_factory=dict)
+    health_check: Optional[Dict[str, Any]] = None
+    ports: Dict[str, int] = Field(default_factory=dict)
+
+    @field_validator("image")
+    @classmethod
+    def validate_service_image(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._\-/:@]+$', v):
+            raise ValueError(f"Invalid Docker image reference: {v}")
+        return v
+
+
+class MatrixConfig(BaseModel):
+    """Matrix build configuration for a workflow job."""
+    parameters: Dict[str, List[str]] = Field(default_factory=dict)
+    exclude: List[Dict[str, str]] = Field(default_factory=list)
+    include: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class WorkflowJob(BaseModel):
+    """A single job within a workflow definition."""
+    name: str = ""
+    image: str
+    commands: List[str]
+    requires: List[str] = Field(default_factory=list)
+    if_condition: Optional[str] = Field(None, alias="if")
+    on_complete: str = "success"
+    services: Dict[str, ServiceDefinition] = Field(default_factory=dict)
+    artifacts: List[str] = Field(default_factory=list)
+    timeout: int = 300
+    env: Dict[str, str] = Field(default_factory=dict)
+    matrix: Optional[MatrixConfig] = None
+
+    model_config = {"populate_by_name": True}
+
+    @field_validator("on_complete")
+    @classmethod
+    def validate_on_complete(cls, v: str) -> str:
+        if v not in {"success", "failure", "always"}:
+            raise ValueError(f"on_complete must be 'success', 'failure', or 'always', got '{v}'")
+        return v
+
+
+class WorkflowSpec(BaseModel):
+    """Complete workflow specification parsed from YAML."""
+    name: str
+    description: Optional[str] = None
+    env: Dict[str, str] = Field(default_factory=dict)
+    jobs: Dict[str, WorkflowJob]
+    timeout: int = 3600
+    cleanup_policy: str = "remove_on_completion"
+
+    @field_validator("name")
+    @classmethod
+    def validate_workflow_name(cls, v: str) -> str:
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_\-]*$', v):
+            raise ValueError("Workflow name must be alphanumeric with hyphens/underscores")
+        if len(v) > 128:
+            raise ValueError("Workflow name too long (max 128 chars)")
+        return v
+
+
+class WorkflowJobStatus(BaseModel):
+    """Status of an individual job within a workflow run."""
+    job_name: str
+    status: JobStatus
+    job_id: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    error: Optional[str] = None
+    matrix_key: Optional[str] = None
+
+
+class WorkflowRecord(BaseModel):
+    """Persisted record of a workflow execution."""
+    workflow_id: str
+    spec_name: str
+    status: WorkflowStatus
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    job_statuses: Dict[str, WorkflowJobStatus] = Field(default_factory=dict)
+    env: Dict[str, str] = Field(default_factory=dict)
+    error: Optional[str] = None
+    triggered_by: Optional[str] = None
+
+
+class WorkflowSubmitRequest(BaseModel):
+    """Request body for submitting a workflow via API."""
+    spec: WorkflowSpec
+    triggered_by: Optional[str] = None
+
+
+class WorkflowSubmitResponse(BaseModel):
+    workflow_id: str
+    status: WorkflowStatus
+    created_at: datetime
+    message: str
+
+
+class WorkflowStatusResponse(BaseModel):
+    workflow_id: str
+    status: WorkflowStatus
+    record: WorkflowRecord
+
+
+class WorkflowListResponse(BaseModel):
+    workflows: List[WorkflowRecord]
+    count: int
+
+
+class WorkflowCancelResponse(BaseModel):
+    workflow_id: str
+    status: WorkflowStatus
+    message: str
+
+
+class WorkflowJobsResponse(BaseModel):
+    workflow_id: str
+    jobs: Dict[str, WorkflowJobStatus]
+    count: int
