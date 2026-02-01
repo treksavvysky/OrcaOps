@@ -12,6 +12,7 @@ from rich.prompt import Prompt, Confirm
 from rich.text import Text
 from rich.live import Live
 
+
 console = Console()
 
 class InteractiveMode:
@@ -606,38 +607,15 @@ Use Ctrl+C at any time to exit.
     
     @staticmethod
     def get_status_icon(status: str) -> str:
-        """Get status icon for container"""
-        status_icons = {
-            'running': '🟢',
-            'exited': '🔴',
-            'restarting': '🟡',
-            'paused': '🟠',
-            'created': '⚪',
-            'dead': '💀'
-        }
-        return status_icons.get(status.lower(), '❓')
-    
+        from orcaops.cli_enhanced import get_container_status_icon
+        return get_container_status_icon(status)
+
     @staticmethod
     def format_duration(seconds: float) -> str:
-        """Format duration in human-readable format"""
-        if seconds < 60:
-            return f"{int(seconds)}s"
-        elif seconds < 3600:
-            return f"{int(seconds // 60)}m {int(seconds % 60)}s"
-        elif seconds < 86400:
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            return f"{hours}h {minutes}m"
-        else:
-            days = int(seconds // 86400)
-            hours = int((seconds % 86400) // 3600)
-            return f"{days}d {hours}h"
-    
+        from orcaops.cli_enhanced import format_duration
+        return format_duration(seconds)
+
     @staticmethod
     def format_size(bytes_size: int) -> str:
-        """Format bytes in human-readable format"""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if bytes_size < 1024.0:
-                return f"{bytes_size:.1f}{unit}"
-            bytes_size /= 1024.0
-        return f"{bytes_size:.1f}PB"
+        from orcaops.cli_enhanced import format_size
+        return format_size(bytes_size)

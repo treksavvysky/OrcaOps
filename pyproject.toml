@@ -47,6 +47,9 @@ addopts = "--cov=orcaops --cov-report=term-missing --cov-report=xml"
 testpaths = [
     "tests",
 ]
+markers = [
+    "docker: marks tests that require a running Docker daemon",
+]
 pythonpath = ["."] # Add current directory to pythonpath to help with imports if needed
 python_files = "test_*.py"
 python_classes = "Test*"

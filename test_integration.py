@@ -88,10 +88,10 @@ def test_api_functionality():
         try:
             api_process.terminate()
             api_process.wait(timeout=5)
-        except:
+        except Exception:
             try:
                 api_process.kill()
-            except:
+            except Exception:
                 pass
 
 
