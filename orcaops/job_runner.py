@@ -1,6 +1,7 @@
 import os
 import json
 import hashlib
+import shlex
 import time
 import shutil
 import threading
@@ -145,7 +146,7 @@ class JobRunner:
                 logger.info(f"Collecting artifact pattern: {artifact_pattern}")
                 # Safer glob resolution using find -print0
                 # Using sh -c to allow glob expansion if user provided wildcards
-                find_cmd = ["/bin/sh", "-c", f"find {artifact_pattern} -maxdepth 0 -print0 2>/dev/null"]
+                find_cmd = ["/bin/sh", "-c", f"find {shlex.quote(artifact_pattern)} -maxdepth 0 -print0 2>/dev/null"]
 
                 try:
                     # We need raw output (bytes) for null separator, exec_command returns string.

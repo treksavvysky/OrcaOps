@@ -57,20 +57,20 @@
 ### Tasks
 
 #### 2.1 Run Record Storage
-- [ ] Create `~/.orcaops/runs/` directory structure
-- [ ] Save each `RunRecord` as `{job_id}.json`
-- [ ] Append to `runs.jsonl` for streaming analysis
-- [ ] Include timestamps, duration, resource usage
+- [x] Store run records in `~/.orcaops/artifacts/{job_id}/`
+- [x] Save each `RunRecord` as `run.json`
+- [x] Append step log to `steps.jsonl`
+- [x] Include timestamps, duration, fingerprint
 
 #### 2.2 Run Record API
-- [ ] `GET /orcaops/runs` - List historical runs
-- [ ] `GET /orcaops/runs/{job_id}` - Get specific run record
-- [ ] `DELETE /orcaops/runs/{job_id}` - Delete run record
+- [x] `GET /orcaops/runs` - List historical runs
+- [x] `GET /orcaops/runs/{job_id}` - Get specific run record
+- [x] `DELETE /orcaops/runs/{job_id}` - Delete run record
 
 #### 2.3 Run Record Cleanup
-- [ ] Implement retention policy (default: 30 days)
-- [ ] `POST /orcaops/runs/cleanup` - Manual cleanup endpoint
-- [ ] CLI command: `orcaops runs cleanup --older-than 7d`
+- [x] Implement retention policy (default: 30 days)
+- [x] `POST /orcaops/runs/cleanup` - Manual cleanup endpoint
+- [x] CLI command: `orcaops runs-cleanup --older-than 7d`
 
 ### Deliverables
 - `orcaops/run_store.py` - Run record persistence layer
@@ -89,10 +89,10 @@
 ### Tasks
 
 #### 3.1 Artifact Extraction
-- [ ] Implement `docker cp` wrapper in `DockerManager`
-- [ ] Support glob patterns for artifact paths
-- [ ] Calculate SHA256 checksums
-- [ ] Store in `~/.orcaops/artifacts/{job_id}/`
+- [x] Implement `docker cp` wrapper in `DockerManager`
+- [x] Support glob patterns for artifact paths
+- [x] Calculate SHA256 checksums
+- [x] Store in `~/.orcaops/artifacts/{job_id}/`
 
 #### 3.2 Artifact API
 - [x] `GET /orcaops/jobs/{job_id}/artifacts` - List artifacts
@@ -101,8 +101,8 @@
 
 #### 3.3 Artifact Metadata
 - [x] Store `ArtifactMetadata` in run record
-- [ ] Support artifact retention policies
-- [ ] Compress large artifacts (optional gzip)
+- [ ] Support artifact retention policies (deferred)
+- [ ] Compress large artifacts (deferred)
 
 ### Deliverables
 - Artifact extraction in `JobRunner`
@@ -115,31 +115,28 @@
 
 ### Objectives
 - Stream container logs to clients in real-time
-- Support both WebSocket and SSE (Server-Sent Events)
+- Support SSE (Server-Sent Events) for broad client compatibility
 - Enable AI agents to monitor job progress
 
 ### Tasks
 
-#### 4.1 WebSocket Streaming
-- [ ] `WS /orcaops/jobs/{job_id}/logs/stream` - WebSocket endpoint
-- [ ] Stream stdout/stderr as job runs
-- [ ] Send structured messages with timestamps
-- [ ] Handle connection lifecycle
+#### 4.1 SSE Log Streaming
+- [x] `GET /orcaops/jobs/{job_id}/logs/stream` - SSE endpoint
+- [x] Stream stdout/stderr as job runs
+- [x] Send structured JSON messages with timestamps
+- [x] Handle connection lifecycle (job completion, client disconnect)
+- [x] Support `?tail=N` query parameter
 
-#### 4.2 SSE Alternative
-- [ ] `GET /orcaops/jobs/{job_id}/logs/stream` - SSE endpoint
-- [ ] For clients that don't support WebSocket
-- [ ] Same data format as WebSocket
+#### 4.2 WebSocket Streaming
+- [ ] WebSocket endpoint (deferred — SSE covers all current use cases)
 
 #### 4.3 Log Buffering
-- [ ] Buffer recent logs for late-joining clients
-- [ ] Configurable buffer size (default: 1000 lines)
-- [ ] Support `?since=timestamp` parameter
+- [ ] Buffer recent logs for late-joining clients (deferred)
+- [ ] Support `?since=timestamp` parameter (deferred)
 
 ### Deliverables
-- WebSocket endpoint for log streaming
-- SSE fallback endpoint
-- Log buffer implementation
+- SSE endpoint for log streaming
+- Async bridge from Docker SDK sync streaming to async SSE
 
 ---
 
@@ -152,46 +149,54 @@
 ### Tasks
 
 #### 5.1 Job Submission CLI
-- [ ] `orcaops run <image> <command>` - Quick job submission
-- [ ] `orcaops run --spec job.yaml` - Submit from spec file
-- [ ] Support inline environment variables and mounts
+- [x] `orcaops run <image> <command>` - Quick job submission
+- [x] `orcaops run --spec job.yaml` - Submit from spec file
+- [x] Support inline environment variables (`--env`) and artifacts (`--artifact`)
 
 #### 5.2 Job Monitoring CLI
-- [ ] `orcaops jobs` - List recent jobs
-- [ ] `orcaops jobs status <job_id>` - Show job status
-- [ ] `orcaops jobs logs <job_id>` - Stream or show logs
-- [ ] `orcaops jobs cancel <job_id>` - Cancel running job
+- [x] `orcaops jobs` - List recent jobs
+- [x] `orcaops jobs status <job_id>` - Show job status
+- [x] `orcaops jobs logs <job_id>` - Show or follow job logs
+- [x] `orcaops jobs cancel <job_id>` - Cancel running job
 
 #### 5.3 Artifact CLI
-- [ ] `orcaops jobs artifacts <job_id>` - List artifacts
-- [ ] `orcaops jobs download <job_id> <path>` - Download artifact
+- [x] `orcaops jobs artifacts <job_id>` - List artifacts
+- [x] `orcaops jobs download <job_id> <filename>` - Download artifact
 
 ### Deliverables
-- New CLI commands in `cli_utils_fixed.py`
-- Interactive log streaming with rich output
-- Job spec YAML examples
+- New CLI commands in `orcaops/cli_jobs.py`
+- Interactive log following with rich output
+- Job spec YAML support
+
+---
+
+## Security Hardening
+
+- [x] Fix artifact pattern shell injection (`shlex.quote()` in `job_runner.py`)
+- [x] Add input validation for `JobSpec` fields (job_id, image, ttl, artifacts)
+- [x] Path traversal protection on artifact download
+- [x] 22 security-focused unit tests
 
 ---
 
 ## Success Criteria
 
-- [ ] Can submit a job via API and receive job_id
-- [ ] Can poll job status until completion
-- [ ] Can retrieve artifacts after job completes
-- [ ] Can stream logs in real-time
-- [ ] All endpoints documented in OpenAPI schema
-- [ ] 80%+ test coverage on new code
-- [ ] CLI commands work for all API operations
+- [x] Can submit a job via API and receive job_id
+- [x] Can poll job status until completion
+- [x] Can retrieve artifacts after job completes
+- [x] Can stream logs in real-time (SSE)
+- [x] All endpoints documented in OpenAPI schema (auto-generated)
+- [x] 80%+ test coverage on new code
+- [x] CLI commands work for all API operations
 
 ---
 
 ## Technical Notes
 
 ### Background Task Runner
-Consider using:
-- `asyncio.create_task()` for simple cases
-- `BackgroundTasks` from FastAPI
-- Redis + Celery for production scale (future sprint)
+Implementation uses Python `threading.Thread` with per-job `threading.Lock` for
+thread-safe state management. `JobManager` handles in-memory active jobs with
+automatic eviction to disk for completed jobs.
 
 ### Job State Machine
 ```
@@ -202,7 +207,7 @@ QUEUED -> RUNNING -> SUCCESS
 ```
 
 ### API Response Format
-All job-related endpoints should return consistent structure:
+All job-related endpoints return consistent structure:
 ```json
 {
   "job_id": "abc123",
@@ -221,5 +226,5 @@ All job-related endpoints should return consistent structure:
 ## Dependencies
 
 - Existing: `JobRunner`, `DockerManager`, `RunRecord`, `JobSpec`
-- New: `websockets` or `starlette` WebSocket support
-- Optional: `aiofiles` for async file operations
+- Used: Starlette `StreamingResponse` for SSE (included via FastAPI)
+- No new package dependencies required

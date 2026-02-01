@@ -1,15 +1,21 @@
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
-from typing import List, Optional
+import asyncio
+import json as json_module
 import hashlib
 import os
 import subprocess
+from datetime import datetime, timezone
+from typing import List, Optional
+
 import docker
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
+from starlette.responses import StreamingResponse
 
 from orcaops.docker_manager import DockerManager
 from orcaops.sandbox_templates_simple import SandboxTemplates, TemplateManager
 from orcaops.sandbox_registry import get_registry
 from orcaops.job_manager import JobManager
+from orcaops.run_store import RunStore
 from orcaops.schemas import (
     Container,
     ContainerInspect,
@@ -29,11 +35,16 @@ from orcaops.schemas import (
     JobCancelResponse,
     JobArtifactListResponse,
     ArtifactMetadata,
+    RunListResponse,
+    RunDeleteResponse,
+    RunCleanupRequest,
+    RunCleanupResponse,
 )
 
 router = APIRouter()
 docker_manager = DockerManager()
 job_manager = JobManager()
+run_store = RunStore()
 
 
 # Container Management Endpoints
@@ -560,3 +571,187 @@ async def download_job_artifact(job_id: str, filename: str):
         raise HTTPException(status_code=404, detail="Artifact not found.")
 
     return FileResponse(requested, filename=filename)
+
+
+# Log Streaming Endpoint
+
+_TERMINAL_STATUSES = {JobStatus.SUCCESS, JobStatus.FAILED, JobStatus.TIMED_OUT, JobStatus.CANCELLED}
+
+
+def _sse_event(data: dict, event_type: str = "message") -> str:
+    """Format a single Server-Sent Event."""
+    lines = []
+    if event_type != "message":
+        lines.append(f"event: {event_type}")
+    lines.append(f"data: {json_module.dumps(data)}")
+    lines.append("")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _parse_docker_timestamp(line: str) -> tuple:
+    """Extract Docker timestamp prefix from log line if present."""
+    if len(line) > 30 and line[10] == 'T':
+        space_idx = line.find(' ')
+        if 25 < space_idx < 40:
+            return line[:space_idx], line[space_idx + 1:]
+    return datetime.now(timezone.utc).isoformat(), line
+
+
+@router.get("/jobs/{job_id}/logs/stream", summary="Stream job logs via SSE")
+async def stream_job_logs(
+    job_id: str,
+    tail: int = Query(100, ge=0, le=10000, description="Number of historical lines"),
+):
+    """
+    Stream logs from a running job's container using Server-Sent Events.
+
+    Each event is JSON: {"timestamp": "...", "stream": "stdout", "line": "..."}
+    Stream ends with an event of type `done`.
+
+    Usage: curl -N http://localhost:8000/orcaops/jobs/{job_id}/logs/stream
+    """
+    record = job_manager.get_job(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    container_id = record.sandbox_id
+    if not container_id:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job '{job_id}' has no associated container (status: {record.status.value}).",
+        )
+
+    if record.status in _TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=410,
+            detail=f"Job '{job_id}' already completed ({record.status.value}). "
+                   f"Use GET /orcaops/logs/{container_id} for static logs.",
+        )
+
+    async def event_generator():
+        loop = asyncio.get_event_loop()
+
+        try:
+            container = await loop.run_in_executor(
+                None, docker_manager.client.containers.get, container_id
+            )
+        except docker.errors.NotFound:
+            yield _sse_event(
+                {"stream": "system", "line": "Container not found.",
+                 "timestamp": datetime.now(timezone.utc).isoformat()}
+            )
+            yield _sse_event(
+                {"stream": "system", "line": "Stream ended.",
+                 "timestamp": datetime.now(timezone.utc).isoformat()},
+                event_type="done",
+            )
+            return
+
+        log_kwargs = {"stream": True, "follow": True, "timestamps": True}
+        if tail > 0:
+            log_kwargs["tail"] = tail
+
+        queue = asyncio.Queue()
+
+        def reader():
+            try:
+                log_stream = container.logs(**log_kwargs)
+                for chunk in log_stream:
+                    loop.call_soon_threadsafe(queue.put_nowait, chunk)
+            except Exception as e:
+                loop.call_soon_threadsafe(queue.put_nowait, e)
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        loop.run_in_executor(None, reader)
+
+        try:
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    break
+                if isinstance(chunk, Exception):
+                    yield _sse_event({
+                        "stream": "system",
+                        "line": f"Error: {chunk}",
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    break
+
+                line = chunk.decode("utf-8", errors="replace").rstrip("\n")
+                ts, msg = _parse_docker_timestamp(line)
+                yield _sse_event({"timestamp": ts, "stream": "stdout", "line": msg})
+        except asyncio.CancelledError:
+            pass
+
+        yield _sse_event(
+            {"stream": "system", "line": "Stream ended.",
+             "timestamp": datetime.now(timezone.utc).isoformat()},
+            event_type="done",
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# Run History Endpoints
+
+@router.get("/runs", response_model=RunListResponse, summary="List historical runs")
+async def list_runs(
+    status: Optional[JobStatus] = Query(None, description="Filter by job status"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
+    limit: int = Query(50, ge=1, le=200, description="Pagination limit"),
+):
+    """
+    List historical run records from disk.
+    Distinct from /jobs which shows in-memory active jobs.
+    """
+    records, total = run_store.list_runs(status=status, limit=limit, offset=offset)
+    return RunListResponse(runs=records, total=total, offset=offset, limit=limit)
+
+
+@router.post("/runs/cleanup", response_model=RunCleanupResponse, summary="Cleanup old runs")
+async def cleanup_runs(request: RunCleanupRequest = RunCleanupRequest()):
+    """
+    Delete run records older than the specified number of days.
+    """
+    deleted = run_store.cleanup_old_runs(older_than_days=request.older_than_days)
+    return RunCleanupResponse(
+        deleted_count=len(deleted),
+        deleted_job_ids=deleted,
+        message=f"Deleted {len(deleted)} run(s) older than {request.older_than_days} days.",
+    )
+
+
+@router.get("/runs/{job_id}", response_model=JobStatusResponse, summary="Get historical run")
+async def get_run(job_id: str):
+    """
+    Get a specific historical run record.
+    """
+    record = run_store.get_run(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Run '{job_id}' not found.")
+    return JobStatusResponse(job_id=record.job_id, status=record.status, record=record)
+
+
+@router.delete("/runs/{job_id}", response_model=RunDeleteResponse, summary="Delete a run")
+async def delete_run(job_id: str):
+    """
+    Delete a run record and its artifacts from disk.
+    """
+    deleted = run_store.delete_run(job_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Run '{job_id}' not found.")
+    return RunDeleteResponse(
+        job_id=job_id,
+        deleted=True,
+        message=f"Run '{job_id}' and its artifacts deleted.",
+    )

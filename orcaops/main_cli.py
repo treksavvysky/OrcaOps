@@ -10,6 +10,10 @@ from orcaops.cli_utils_fixed import CLICommands, CLIUtils
 # Add enhanced commands to the main app
 CLICommands.add_commands(app)
 
+# Add job management commands
+from orcaops.cli_jobs import JobCLI
+JobCLI.add_commands(app)
+
 @app.command("version", help="📦 Show OrcaOps version information")
 def show_version():
     """Display version and system information"""

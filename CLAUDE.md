@@ -61,15 +61,18 @@ API (FastAPI) ─┘
 
 - **`schemas.py`** — All Pydantic models. Core chain: `JobSpec` → `StepResult` → `RunRecord`. Also defines API request/response models and enums (`JobStatus`, `CleanupStatus`, `SandboxStatus`).
 
-- **`api.py`** — FastAPI router. Instantiates `DockerManager` and `JobManager` as module-level singletons. Endpoints for containers (`/ps`, `/run`, `/logs`, etc.), sandboxes, templates, and jobs (`/jobs/submit`, `/jobs/{id}/status`, `/jobs/{id}/cancel`).
+- **`run_store.py`** — Disk-backed persistence layer for historical run records. Scans `~/.orcaops/artifacts/*/run.json` for listing, filtering, deletion, and time-based cleanup.
+
+- **`api.py`** — FastAPI router. Instantiates `DockerManager`, `JobManager`, and `RunStore` as module-level singletons. Endpoints for containers (`/ps`, `/logs`, etc.), sandboxes, templates, jobs (`/jobs`, `/jobs/{id}`, `/jobs/{id}/cancel`, `/jobs/{id}/artifacts`, `/jobs/{id}/logs/stream`), and run history (`/runs`, `/runs/{id}`, `/runs/cleanup`).
 
 ### CLI Structure
 
-- `main_cli.py` — Entry point, wires together commands from the two modules below
-- `cli_enhanced.py` — Core commands (ps, logs, rm, stop, inspect, doctor, interactive) and shared utility functions (`format_duration`, `format_size`, `get_container_status_icon`)
+- `main_cli.py` — Entry point, wires together commands from the modules below
+- `cli_enhanced.py` — Core container commands (ps, logs, rm, stop, inspect, doctor, interactive) and shared utility functions (`format_duration`, `format_size`, `get_container_status_icon`)
 - `cli_utils_fixed.py` — Sandbox commands (init, list, up, down, cleanup, templates) and `CLIUtils`/`CLICommands` classes
+- `cli_jobs.py` — Job management commands (run, jobs, jobs status/logs/cancel/artifacts/download, runs-cleanup)
 
-New CLI commands should go in `cli_enhanced.py`. Sandbox-related commands go in `cli_utils_fixed.py`.
+New container commands go in `cli_enhanced.py`. Sandbox commands go in `cli_utils_fixed.py`. Job commands go in `cli_jobs.py`.
 
 ### Data Flow for Job Execution
 
@@ -107,11 +110,16 @@ Tests use `unittest.mock.patch` extensively to mock Docker SDK calls. No real Do
 - `test_docker_manager.py` — DockerManager unit tests (container lifecycle, builds, errors)
 - `test_sandbox_runner.py` — SandboxRunner integration tests (YAML loading, cleanup policies, timeouts)
 - `test_golden_path.py` — JobRunner end-to-end tests (success, failure, timeout, artifact collection)
-- `test_cli.py` — CLI integration tests
+- `test_cli.py` — CLI integration tests (container commands)
+- `test_cli_jobs.py` — CLI job command tests (run, jobs, cancel, artifacts)
 - `test_builder_integration.py` — Docker image build tests
+- `test_security.py` — Input validation tests (job_id, image, artifacts, TTL)
+- `test_run_store.py` — RunStore persistence layer tests
+- `test_api_runs.py` — Run history API endpoint tests
+- `test_api_streaming.py` — SSE log streaming endpoint tests
 
 Coverage is configured in `pyproject.toml` via pytest addopts: `--cov=orcaops --cov-report=term-missing`.
 
 ## Product Context
 
-OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Current focus is Sprint 01: exposing JobRunner through the REST API.
+OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Sprint 01 (Job Execution API) is complete. Next: Sprint 02 (MCP Server Integration).
