@@ -30,16 +30,43 @@ python run_api.py
 python run_api.py --host 0.0.0.0 --port 8000 --reload
 ```
 
+## MCP Server
+
+OrcaOps exposes an MCP (Model Context Protocol) server for Claude Code and other MCP clients:
+
+```bash
+# Start the MCP server (stdio transport)
+orcaops-mcp
+
+# Debug mode
+orcaops-mcp --debug
+```
+
+**Claude Code configuration** — add to `~/.claude/settings.json` or project `.mcp.json`:
+```json
+{
+  "mcpServers": {
+    "orcaops": {
+      "command": "orcaops-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+24 MCP tools available: `orcaops_run_job`, `orcaops_submit_job`, `orcaops_list_jobs`, `orcaops_get_job_status`, `orcaops_get_job_logs`, `orcaops_cancel_job`, `orcaops_list_artifacts`, `orcaops_get_artifact`, `orcaops_list_sandboxes`, `orcaops_get_sandbox`, `orcaops_create_sandbox`, `orcaops_start_sandbox`, `orcaops_stop_sandbox`, `orcaops_list_templates`, `orcaops_get_template`, `orcaops_list_containers`, `orcaops_get_container_logs`, `orcaops_inspect_container`, `orcaops_stop_container`, `orcaops_remove_container`, `orcaops_system_info`, `orcaops_cleanup_containers`, `orcaops_list_runs`, `orcaops_get_run`, `orcaops_delete_run`, `orcaops_cleanup_runs`.
+
 No linter or formatter is configured. No CI/CD pipeline exists yet.
 
 ## Architecture Overview
 
-OrcaOps is a Docker container management system with dual interfaces (CLI and REST API) sharing common core modules.
+OrcaOps is a Docker container management system with three interfaces (CLI, REST API, and MCP server) sharing common core modules.
 
 ```
 CLI (Typer)  ──┐
                ├──► Core Modules ──► Docker SDK
-API (FastAPI) ─┘
+API (FastAPI) ─┤
+MCP (FastMCP) ─┘
 ```
 
 ### Entry Points
@@ -48,6 +75,7 @@ API (FastAPI) ─┘
 - **API**: `main.py` creates FastAPI app with routes from `orcaops/api.py` under `/orcaops/` prefix
 - **API launcher**: `python run_api.py` (wraps uvicorn)
 - **API Docs**: `/docs` (Swagger), `/redoc`
+- **MCP**: `orcaops-mcp` command → `orcaops/mcp_server.py` (stdio transport)
 
 ### Core Modules
 
@@ -64,6 +92,8 @@ API (FastAPI) ─┘
 - **`run_store.py`** — Disk-backed persistence layer for historical run records. Scans `~/.orcaops/artifacts/*/run.json` for listing, filtering, deletion, and time-based cleanup.
 
 - **`api.py`** — FastAPI router. Instantiates `DockerManager`, `JobManager`, and `RunStore` as module-level singletons. Endpoints for containers (`/ps`, `/logs`, etc.), sandboxes, templates, jobs (`/jobs`, `/jobs/{id}`, `/jobs/{id}/cancel`, `/jobs/{id}/artifacts`, `/jobs/{id}/logs/stream`), and run history (`/runs`, `/runs/{id}`, `/runs/cleanup`).
+
+- **`mcp_server.py`** — MCP server using FastMCP (decorator-based API). Exposes 24 tools across 5 categories (job execution, sandbox management, containers, system, run history). Uses lazy-initialized singletons for `JobManager`, `RunStore`, `DockerManager`, and `SandboxRegistry`. All tools return structured JSON with `success`/`error` fields. Stdio transport for Claude Code integration.
 
 ### CLI Structure
 
@@ -117,9 +147,10 @@ Tests use `unittest.mock.patch` extensively to mock Docker SDK calls. No real Do
 - `test_run_store.py` — RunStore persistence layer tests
 - `test_api_runs.py` — Run history API endpoint tests
 - `test_api_streaming.py` — SSE log streaming endpoint tests
+- `test_mcp_server.py` — MCP server tool tests (all 24 tools, mocked dependencies)
 
 Coverage is configured in `pyproject.toml` via pytest addopts: `--cov=orcaops --cov-report=term-missing`.
 
 ## Product Context
 
-OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Sprint 01 (Job Execution API) is complete. Next: Sprint 02 (MCP Server Integration).
+OrcaOps is an AI-native DevOps platform — a sandboxed execution environment for AI agents to run code, manage infrastructure, and orchestrate workflows. Target integrations include MCP Server (Claude Code), Custom GPT Actions (REST API), and CI/CD pipelines. The development roadmap is in `docs/` with 6 sprint plans (SPRINT-01 through SPRINT-06). Sprint 01 (Job Execution API) and Sprint 02 (MCP Server Integration) are complete. Next: Sprint 03 (Observability & Intelligent Run Records).
