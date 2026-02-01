@@ -39,7 +39,11 @@ from orcaops.schemas import (
     RunDeleteResponse,
     RunCleanupRequest,
     RunCleanupResponse,
+    JobSummaryResponse,
+    MetricsResponse,
 )
+from orcaops.log_analyzer import SummaryGenerator
+from orcaops.metrics import MetricsAggregator
 
 router = APIRouter()
 docker_manager = DockerManager()
@@ -481,6 +485,9 @@ async def submit_job(job_spec: JobSpec):
     if any(not command.command.strip() for command in job_spec.commands):
         raise HTTPException(status_code=400, detail="Command entries must be non-empty strings.")
 
+    if not job_spec.triggered_by:
+        job_spec.triggered_by = "api"
+
     try:
         record = job_manager.submit_job(job_spec)
     except ValueError as exc:
@@ -571,6 +578,36 @@ async def download_job_artifact(job_id: str, filename: str):
         raise HTTPException(status_code=404, detail="Artifact not found.")
 
     return FileResponse(requested, filename=filename)
+
+
+@router.get("/jobs/{job_id}/summary", response_model=JobSummaryResponse, summary="Get job summary")
+async def get_job_summary(job_id: str):
+    """
+    Get a deterministic summary of a job execution including one-liner,
+    key events, errors, warnings, and suggestions.
+    """
+    record = job_manager.get_job(job_id)
+    if not record:
+        record = run_store.get_run(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found.")
+
+    generator = SummaryGenerator()
+    summary = generator.generate(record)
+    return JobSummaryResponse(job_id=job_id, summary=summary)
+
+
+@router.get("/metrics/jobs", response_model=MetricsResponse, summary="Get job metrics")
+async def get_job_metrics(
+    from_date: Optional[datetime] = Query(None, description="Start of date range (ISO 8601)"),
+    to_date: Optional[datetime] = Query(None, description="End of date range (ISO 8601)"),
+):
+    """
+    Get aggregate job metrics including success rates, durations, and per-image breakdown.
+    """
+    aggregator = MetricsAggregator(run_store)
+    metrics = aggregator.compute_metrics(from_date=from_date, to_date=to_date)
+    return MetricsResponse(**metrics)
 
 
 # Log Streaming Endpoint
@@ -707,14 +744,33 @@ async def stream_job_logs(
 @router.get("/runs", response_model=RunListResponse, summary="List historical runs")
 async def list_runs(
     status: Optional[JobStatus] = Query(None, description="Filter by job status"),
+    image: Optional[str] = Query(None, description="Filter by image (substring match)"),
+    tags: Optional[str] = Query(None, description="Filter by tags (comma-separated, all must match)"),
+    triggered_by: Optional[str] = Query(None, description="Filter by trigger source"),
+    after: Optional[datetime] = Query(None, description="Only runs created after this date (ISO 8601)"),
+    before: Optional[datetime] = Query(None, description="Only runs created before this date (ISO 8601)"),
+    min_duration: Optional[float] = Query(None, description="Minimum duration in seconds"),
+    max_duration: Optional[float] = Query(None, description="Maximum duration in seconds"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     limit: int = Query(50, ge=1, le=200, description="Pagination limit"),
 ):
     """
-    List historical run records from disk.
+    List historical run records from disk with optional filtering.
     Distinct from /jobs which shows in-memory active jobs.
     """
-    records, total = run_store.list_runs(status=status, limit=limit, offset=offset)
+    tags_list = [t.strip() for t in tags.split(",")] if tags else None
+    records, total = run_store.list_runs(
+        status=status,
+        image=image,
+        tags=tags_list,
+        triggered_by=triggered_by,
+        after=after,
+        before=before,
+        min_duration_seconds=min_duration,
+        max_duration_seconds=max_duration,
+        limit=limit,
+        offset=offset,
+    )
     return RunListResponse(runs=records, total=total, offset=offset, limit=limit)
 
 

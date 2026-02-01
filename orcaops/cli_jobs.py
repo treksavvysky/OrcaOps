@@ -128,6 +128,7 @@ class JobCLI:
                     commands=[JobCommand(command=cmd_str, timeout_seconds=timeout)],
                     artifacts=list(artifact or []),
                     ttl_seconds=timeout,
+                    triggered_by="cli",
                 )
 
             try:
@@ -302,6 +303,111 @@ class JobCLI:
             dest_path = os.path.join(dest, filename)
             shutil.copy2(src_path, dest_path)
             console.print(f"[green]Downloaded {filename} to {dest_path}[/green]")
+
+        @jobs_app.command("summary", help="Show job execution summary")
+        def job_summary(
+            job_id: str = typer.Argument(..., help="Job ID"),
+        ):
+            """Display a deterministic summary of a job execution."""
+            from orcaops.log_analyzer import SummaryGenerator
+
+            jm = _get_job_manager()
+            rs = _get_run_store()
+
+            record = jm.get_job(job_id) or rs.get_run(job_id)
+            if not record:
+                console.print(f"[red]Job '{job_id}' not found.[/red]")
+                raise typer.Exit(1)
+
+            generator = SummaryGenerator()
+            summary = generator.generate(record)
+
+            color = _status_color(record.status)
+            info = (
+                f"[bold]{summary.one_liner}[/bold]\n\n"
+                f"[bold cyan]Status:[/bold cyan] [{color}]{summary.status_label}[/{color}]\n"
+                f"[bold cyan]Duration:[/bold cyan] {summary.duration_human}\n"
+                f"[bold cyan]Steps:[/bold cyan] {summary.step_count} total, "
+                f"{summary.steps_passed} passed, {summary.steps_failed} failed"
+            )
+
+            if summary.key_events:
+                info += "\n\n[bold cyan]Key Events:[/bold cyan]"
+                for event in summary.key_events:
+                    info += f"\n  - {event}"
+
+            if summary.errors:
+                info += "\n\n[bold red]Errors:[/bold red]"
+                for err in summary.errors:
+                    info += f"\n  - {err}"
+
+            if summary.warnings:
+                info += "\n\n[bold yellow]Warnings:[/bold yellow]"
+                for w in summary.warnings:
+                    info += f"\n  - {w}"
+
+            if summary.suggestions:
+                info += "\n\n[bold green]Suggestions:[/bold green]"
+                for s in summary.suggestions:
+                    info += f"\n  - {s}"
+
+            if summary.anomalies:
+                info += "\n\n[bold magenta]Anomalies:[/bold magenta]"
+                for a in summary.anomalies:
+                    info += f"\n  - [{a.severity.value}] {a.message}"
+
+            console.print(Panel(info, title=f"Summary: {job_id}", border_style="blue"))
+
+        @app.command("metrics", help="Show aggregate job metrics")
+        def metrics_command(
+            from_date: Optional[str] = typer.Option(None, "--from", help="Start date (ISO 8601)"),
+            to_date: Optional[str] = typer.Option(None, "--to", help="End date (ISO 8601)"),
+        ):
+            """Display aggregate job metrics from run history."""
+            from datetime import datetime
+            from orcaops.metrics import MetricsAggregator
+
+            rs = _get_run_store()
+            aggregator = MetricsAggregator(rs)
+
+            fd = datetime.fromisoformat(from_date) if from_date else None
+            td = datetime.fromisoformat(to_date) if to_date else None
+
+            m = aggregator.compute_metrics(from_date=fd, to_date=td)
+
+            table = Table(title="Job Metrics", show_header=True, header_style="bold magenta")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", justify="right")
+
+            table.add_row("Total Runs", str(m["total_runs"]))
+            table.add_row("Success", f"[green]{m['success_count']}[/green]")
+            table.add_row("Failed", f"[red]{m['failed_count']}[/red]")
+            table.add_row("Timed Out", f"[yellow]{m['timed_out_count']}[/yellow]")
+            table.add_row("Cancelled", str(m["cancelled_count"]))
+            table.add_row("Success Rate", f"{m['success_rate'] * 100:.1f}%")
+            table.add_row("Avg Duration", _format_duration(m["avg_duration_seconds"]))
+            table.add_row("Total Duration", _format_duration(m["total_duration_seconds"]))
+
+            console.print(table)
+
+            if m["by_image"]:
+                img_table = Table(title="By Image", show_header=True, header_style="bold magenta")
+                img_table.add_column("Image", style="blue")
+                img_table.add_column("Count", justify="right")
+                img_table.add_column("Success", justify="right", style="green")
+                img_table.add_column("Failed", justify="right", style="red")
+                img_table.add_column("Avg Duration", justify="right")
+
+                for img, data in m["by_image"].items():
+                    img_table.add_row(
+                        img,
+                        str(data["count"]),
+                        str(data["success"]),
+                        str(data["failed"]),
+                        _format_duration(data.get("avg_duration_seconds", 0)),
+                    )
+
+                console.print(img_table)
 
         @app.command("runs-cleanup", help="Cleanup old run records")
         def runs_cleanup(

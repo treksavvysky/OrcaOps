@@ -23,6 +23,13 @@ class RunStore:
     def list_runs(
         self,
         status: Optional[JobStatus] = None,
+        image: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        triggered_by: Optional[str] = None,
+        after: Optional[datetime] = None,
+        before: Optional[datetime] = None,
+        min_duration_seconds: Optional[float] = None,
+        max_duration_seconds: Optional[float] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[RunRecord], int]:
@@ -36,12 +43,35 @@ class RunStore:
 
         if status:
             all_records = [r for r in all_records if r.status == status]
+        if image:
+            all_records = [r for r in all_records if r.image_ref and image in r.image_ref]
+        if tags:
+            all_records = [r for r in all_records if all(t in r.tags for t in tags)]
+        if triggered_by:
+            all_records = [r for r in all_records if r.triggered_by == triggered_by]
+        if after:
+            all_records = [r for r in all_records if r.created_at >= after]
+        if before:
+            all_records = [r for r in all_records if r.created_at <= before]
+        if min_duration_seconds is not None:
+            all_records = [r for r in all_records
+                           if self._get_duration(r) >= min_duration_seconds]
+        if max_duration_seconds is not None:
+            all_records = [r for r in all_records
+                           if self._get_duration(r) <= max_duration_seconds]
 
         all_records.sort(key=lambda r: r.created_at, reverse=True)
 
         total = len(all_records)
         sliced = all_records[offset:offset + limit]
         return sliced, total
+
+    @staticmethod
+    def _get_duration(record: RunRecord) -> float:
+        """Get job duration in seconds."""
+        if record.started_at and record.finished_at:
+            return (record.finished_at - record.started_at).total_seconds()
+        return 0.0
 
     def get_run(self, job_id: str) -> Optional[RunRecord]:
         """Get a specific run record by job_id."""

@@ -16,6 +16,66 @@ class CleanupStatus(str, Enum):
     DESTROYED = "destroyed"
     LEAKED = "leaked"
 
+
+# --- Sprint 03: Observability Models ---
+
+class AnomalyType(str, Enum):
+    DURATION = "duration"
+    MEMORY = "memory"
+    ERROR_PATTERN = "error_pattern"
+
+class AnomalySeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+class ResourceUsage(BaseModel):
+    """Resource consumption snapshot from Docker container stats."""
+    cpu_seconds: float = 0.0
+    memory_peak_mb: float = 0.0
+    network_rx_bytes: int = 0
+    network_tx_bytes: int = 0
+    disk_read_bytes: int = 0
+    disk_write_bytes: int = 0
+
+class EnvironmentCapture(BaseModel):
+    """Captured container environment at job start time."""
+    image_digest: Optional[str] = None
+    env_vars: Dict[str, str] = Field(default_factory=dict)
+    resource_limits: Dict[str, Any] = Field(default_factory=dict)
+    docker_version: Optional[str] = None
+
+class LogAnalysis(BaseModel):
+    """Structured analysis of job output logs."""
+    error_count: int = 0
+    warning_count: int = 0
+    first_error: Optional[str] = None
+    stack_traces: List[str] = Field(default_factory=list)
+    error_lines: List[str] = Field(default_factory=list)
+
+class Anomaly(BaseModel):
+    """A detected anomaly for a job run."""
+    anomaly_type: AnomalyType
+    severity: AnomalySeverity
+    expected: str
+    actual: str
+    message: str
+
+class JobSummary(BaseModel):
+    """Deterministic summary of a job execution."""
+    job_id: str
+    one_liner: str
+    status_label: str
+    duration_human: str
+    step_count: int
+    steps_passed: int
+    steps_failed: int
+    key_events: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    suggestions: List[str] = Field(default_factory=list)
+    anomalies: List[Anomaly] = Field(default_factory=list)
+
 class JobCommand(BaseModel):
     command: str = Field(..., description="The command to execute")
     cwd: Optional[str] = Field(None, description="Working directory for the command")
@@ -41,6 +101,12 @@ class JobSpec(BaseModel):
     commands: List[JobCommand]
     artifacts: List[str] = Field(default_factory=list, description="List of paths/globs to collect")
     ttl_seconds: int = Field(3600, description="Total time to live for the sandbox")
+    # Sprint 03: context fields
+    triggered_by: Optional[str] = Field(None, description="Trigger source: cli, api, mcp, scheduler")
+    intent: Optional[str] = Field(None, description="Natural language description of job purpose")
+    parent_job_id: Optional[str] = Field(None, description="Parent job ID for chained executions")
+    tags: List[str] = Field(default_factory=list, description="Tags for categorization and filtering")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Custom key-value metadata")
 
     @field_validator("job_id")
     @classmethod
@@ -95,6 +161,16 @@ class RunRecord(BaseModel):
     ttl_expiry: Optional[datetime] = None
     fingerprint: Optional[str] = None
     error: Optional[str] = None
+    # Sprint 03: observability fields
+    triggered_by: Optional[str] = None
+    intent: Optional[str] = None
+    parent_job_id: Optional[str] = None
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    resource_usage: Optional[ResourceUsage] = None
+    environment: Optional[EnvironmentCapture] = None
+    log_analysis: Optional[LogAnalysis] = None
+    anomalies: List[Anomaly] = Field(default_factory=list)
 
 
 class JobSubmitResponse(BaseModel):
@@ -237,3 +313,26 @@ class SandboxCreateRequest(BaseModel):
     template: str = Field(..., description="Template name (web-dev, python-ml, api-testing)")
     name: str = Field(..., description="Sandbox name")
     directory: Optional[str] = Field(None, description="Output directory (defaults to ./{name})")
+
+
+# Sprint 03: Observability Response Models
+
+class JobSummaryResponse(BaseModel):
+    """Response for job summary endpoint."""
+    job_id: str
+    summary: JobSummary
+
+
+class MetricsResponse(BaseModel):
+    """Response for job metrics endpoint."""
+    total_runs: int
+    success_count: int
+    failed_count: int
+    timed_out_count: int
+    cancelled_count: int
+    success_rate: float
+    avg_duration_seconds: float
+    total_duration_seconds: float
+    by_image: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None

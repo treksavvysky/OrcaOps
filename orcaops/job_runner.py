@@ -13,7 +13,8 @@ from orcaops import logger
 from orcaops.docker_manager import DockerManager
 from orcaops.schemas import (
     JobSpec, RunRecord, StepResult, ArtifactMetadata,
-    JobStatus, CleanupStatus, JobCommand
+    JobStatus, CleanupStatus, JobCommand,
+    ResourceUsage, EnvironmentCapture,
 )
 
 class JobRunner:
@@ -53,7 +54,12 @@ class JobRunner:
             status=JobStatus.QUEUED,
             fingerprint=fingerprint,
             sandbox_id=None,
-            image_ref=job_spec.sandbox.image
+            image_ref=job_spec.sandbox.image,
+            triggered_by=job_spec.triggered_by,
+            intent=job_spec.intent,
+            parent_job_id=job_spec.parent_job_id,
+            tags=list(job_spec.tags),
+            metadata=dict(job_spec.metadata),
         )
 
         container_id = None
@@ -187,6 +193,18 @@ class JobRunner:
                     logger.warning(f"Error resolving artifact pattern {artifact_pattern}: {e}")
 
 
+            # 4. Collect observability data (before cleanup destroys the container)
+            if container_id:
+                record.environment = self._capture_environment(container_id)
+                record.resource_usage = self._collect_resource_usage(container_id)
+
+            # 5. Analyze logs
+            try:
+                from orcaops.log_analyzer import LogAnalyzer
+                record.log_analysis = LogAnalyzer().analyze_record(record)
+            except Exception as e:
+                logger.warning(f"Failed to analyze logs: {e}")
+
         except Exception as e:
             record.status = JobStatus.FAILED
             record.error = str(e)
@@ -220,6 +238,88 @@ class JobRunner:
                 logger.error(f"Failed to write run record/logs: {e}")
 
         return record
+
+    def _capture_environment(self, container_id: str) -> EnvironmentCapture:
+        """Capture container environment details for observability."""
+        try:
+            container = self.dm.client.containers.get(container_id)
+            attrs = container.attrs
+            config = attrs.get("Config", {})
+
+            # Image digest
+            image_obj = container.image
+            digests = image_obj.attrs.get("RepoDigests", [])
+            image_digest = digests[0] if digests else None
+
+            # Sanitize env vars
+            raw_env = config.get("Env", [])
+            env_dict = {}
+            sensitive_patterns = {"password", "secret", "token", "key", "api_key"}
+            for entry in raw_env:
+                if "=" in entry:
+                    k, v = entry.split("=", 1)
+                    if any(p in k.lower() for p in sensitive_patterns):
+                        env_dict[k] = "***REDACTED***"
+                    else:
+                        env_dict[k] = v
+
+            # Resource limits from HostConfig
+            host_config = attrs.get("HostConfig", {})
+            limits = {}
+            if host_config.get("Memory"):
+                limits["memory_bytes"] = host_config["Memory"]
+            if host_config.get("NanoCpus"):
+                limits["nano_cpus"] = host_config["NanoCpus"]
+
+            docker_version = self.dm.client.version().get("Version", "unknown")
+
+            return EnvironmentCapture(
+                image_digest=image_digest,
+                env_vars=env_dict,
+                resource_limits=limits,
+                docker_version=docker_version,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to capture environment: {e}")
+            return EnvironmentCapture()
+
+    def _collect_resource_usage(self, container_id: str) -> ResourceUsage:
+        """Collect a single snapshot of container resource stats."""
+        try:
+            container = self.dm.client.containers.get(container_id)
+            stats = container.stats(stream=False)
+
+            # CPU: total usage in nanoseconds -> seconds
+            cpu_stats = stats.get("cpu_stats", {})
+            cpu_total = cpu_stats.get("cpu_usage", {}).get("total_usage", 0)
+            cpu_seconds = cpu_total / 1e9
+
+            # Memory: peak from max_usage
+            mem_stats = stats.get("memory_stats", {})
+            memory_peak = mem_stats.get("max_usage", 0)
+            memory_peak_mb = memory_peak / (1024 * 1024)
+
+            # Network I/O
+            networks = stats.get("networks", {})
+            rx_bytes = sum(n.get("rx_bytes", 0) for n in networks.values())
+            tx_bytes = sum(n.get("tx_bytes", 0) for n in networks.values())
+
+            # Block I/O
+            blkio = stats.get("blkio_stats", {}).get("io_service_bytes_recursive", []) or []
+            disk_read = sum(e.get("value", 0) for e in blkio if e.get("op") == "read")
+            disk_write = sum(e.get("value", 0) for e in blkio if e.get("op") == "write")
+
+            return ResourceUsage(
+                cpu_seconds=round(cpu_seconds, 3),
+                memory_peak_mb=round(memory_peak_mb, 2),
+                network_rx_bytes=rx_bytes,
+                network_tx_bytes=tx_bytes,
+                disk_read_bytes=disk_read,
+                disk_write_bytes=disk_write,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to collect resource usage: {e}")
+            return ResourceUsage()
 
     def _read_output_with_timeout(self, output_gen, timeout_sec) -> Tuple[str, str, bool]:
         """Reads from output generator with timeout."""

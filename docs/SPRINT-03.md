@@ -18,11 +18,11 @@
 ### Tasks
 
 #### 1.1 Extended RunRecord Schema
-- [ ] Add `triggered_by` field (user, api, mcp, scheduler)
-- [ ] Add `intent` field (natural language description of purpose)
-- [ ] Add `parent_job_id` for chained executions
-- [ ] Add `tags` for categorization and filtering
-- [ ] Add `metadata` for custom key-value pairs
+- [x] Add `triggered_by` field (user, api, mcp, scheduler)
+- [x] Add `intent` field (natural language description of purpose)
+- [x] Add `parent_job_id` for chained executions
+- [x] Add `tags` for categorization and filtering
+- [x] Add `metadata` for custom key-value pairs
 
 ```python
 class RunRecord(BaseModel):
@@ -37,11 +37,11 @@ class RunRecord(BaseModel):
 ```
 
 #### 1.2 Resource Usage Tracking
-- [ ] Capture CPU time used
-- [ ] Capture peak memory usage
-- [ ] Track network I/O (bytes in/out)
-- [ ] Record disk usage in container
-- [ ] Calculate estimated cost (based on resource usage)
+- [x] Capture CPU time used
+- [x] Capture peak memory usage
+- [x] Track network I/O (bytes in/out)
+- [x] Record disk usage in container
+- [x] Calculate estimated cost (based on resource usage)
 
 ```python
 class ResourceUsage(BaseModel):
@@ -54,11 +54,11 @@ class ResourceUsage(BaseModel):
 ```
 
 #### 1.3 Environment Capture
-- [ ] Record Docker image digest (immutable reference)
-- [ ] Capture environment variables (sanitized)
-- [ ] Store mount configurations
-- [ ] Record network settings
-- [ ] Save container configuration snapshot
+- [x] Record Docker image digest (immutable reference)
+- [x] Capture environment variables (sanitized)
+- [x] Store mount configurations
+- [x] Record network settings
+- [x] Save container configuration snapshot
 
 ### Deliverables
 - Extended `RunRecord` schema
@@ -77,11 +77,11 @@ class ResourceUsage(BaseModel):
 ### Tasks
 
 #### 2.1 Log Parser Framework
-- [ ] Create pluggable log parser interface
-- [ ] Implement JSON log parser (for structured logs)
-- [ ] Implement common format parsers (Python, Node.js, Go)
-- [ ] Detect and extract stack traces
-- [ ] Identify error patterns
+- [x] Create pluggable log parser interface
+- [x] Implement JSON log parser (for structured logs)
+- [x] Implement common format parsers (Python, Node.js, Go)
+- [x] Detect and extract stack traces
+- [x] Identify error patterns
 
 ```python
 class LogEntry(BaseModel):
@@ -94,17 +94,17 @@ class LogEntry(BaseModel):
 ```
 
 #### 2.2 Log Analysis
-- [ ] Count log entries by level
-- [ ] Extract first error message
-- [ ] Identify repeated patterns
-- [ ] Detect hanging/stalled output
-- [ ] Calculate output rate (lines/second)
+- [x] Count log entries by level
+- [x] Extract first error message
+- [x] Identify repeated patterns
+- [x] Detect hanging/stalled output
+- [x] Calculate output rate (lines/second)
 
 #### 2.3 Log Storage
-- [ ] Store parsed logs in `{job_id}_logs.jsonl`
-- [ ] Index by timestamp and level
-- [ ] Support log rotation for long-running jobs
-- [ ] Compress archived logs
+- [x] Store parsed logs in `{job_id}_logs.jsonl`
+- [x] Index by timestamp and level
+- [x] Support log rotation for long-running jobs
+- [x] Compress archived logs
 
 ### Deliverables
 - Log parser framework
@@ -123,11 +123,11 @@ class LogEntry(BaseModel):
 ### Tasks
 
 #### 3.1 Summary Generation
-- [ ] Create summary template for successful jobs
-- [ ] Create summary template for failed jobs
-- [ ] Include key metrics and duration
-- [ ] Highlight significant events
-- [ ] Suggest next actions
+- [x] Create summary template for successful jobs
+- [x] Create summary template for failed jobs
+- [x] Include key metrics and duration
+- [x] Highlight significant events
+- [x] Suggest next actions
 
 ```python
 class JobSummary(BaseModel):
@@ -143,15 +143,15 @@ class JobSummary(BaseModel):
 ```
 
 #### 3.2 Failure Analysis
-- [ ] Categorize failure types (build, test, runtime, timeout)
-- [ ] Extract root cause from logs
-- [ ] Link to similar past failures
-- [ ] Suggest remediation steps
+- [x] Categorize failure types (build, test, runtime, timeout)
+- [x] Extract root cause from logs
+- [x] Link to similar past failures
+- [x] Suggest remediation steps
 
 #### 3.3 Summary API
-- [ ] `GET /orcaops/jobs/{job_id}/summary` - Get job summary
-- [ ] Include summary in MCP tool responses
-- [ ] CLI: `orcaops jobs summary <job_id>`
+- [x] `GET /orcaops/jobs/{job_id}/summary` - Get job summary
+- [x] Include summary in MCP tool responses
+- [x] CLI: `orcaops jobs summary <job_id>`
 
 ### Deliverables
 - `JobSummary` model
@@ -170,23 +170,23 @@ class JobSummary(BaseModel):
 ### Tasks
 
 #### 4.1 Metrics Collection
-- [ ] Job success/failure rate over time
-- [ ] Average job duration by image
-- [ ] Resource usage trends
-- [ ] Sandbox utilization rates
-- [ ] Queue depth and wait times
+- [x] Job success/failure rate over time
+- [x] Average job duration by image
+- [x] Resource usage trends
+- [x] Sandbox utilization rates
+- [x] Queue depth and wait times
 
 #### 4.2 Metrics Storage
-- [ ] Create `~/.orcaops/metrics/` directory
-- [ ] Store daily aggregates in JSON
-- [ ] Support time-range queries
-- [ ] Implement retention policy
+- [x] Create `~/.orcaops/metrics/` directory
+- [x] Store daily aggregates in JSON
+- [x] Support time-range queries
+- [x] Implement retention policy
 
 #### 4.3 Metrics API
-- [ ] `GET /orcaops/metrics/jobs` - Job statistics
-- [ ] `GET /orcaops/metrics/resources` - Resource usage
-- [ ] `GET /orcaops/metrics/sandboxes` - Sandbox statistics
-- [ ] Support `?from=` and `?to=` parameters
+- [x] `GET /orcaops/metrics/jobs` - Job statistics
+- [x] `GET /orcaops/metrics/resources` - Resource usage
+- [x] `GET /orcaops/metrics/sandboxes` - Sandbox statistics
+- [x] Support `?from=` and `?to=` parameters
 
 ### Deliverables
 - Metrics collection system
@@ -205,16 +205,16 @@ class JobSummary(BaseModel):
 ### Tasks
 
 #### 5.1 Baseline Learning
-- [ ] Track historical duration per image+command
-- [ ] Calculate mean and standard deviation
-- [ ] Store baselines in `~/.orcaops/baselines.json`
-- [ ] Update baselines on successful runs
+- [x] Track historical duration per image+command
+- [x] Calculate mean and standard deviation
+- [x] Store baselines in `~/.orcaops/baselines.json`
+- [x] Update baselines on successful runs
 
 #### 5.2 Anomaly Detection
-- [ ] Flag jobs taking >2x normal duration
-- [ ] Detect unusual resource usage
-- [ ] Identify new error patterns
-- [ ] Track flaky jobs (intermittent failures)
+- [x] Flag jobs taking >2x normal duration
+- [x] Detect unusual resource usage
+- [x] Identify new error patterns
+- [x] Track flaky jobs (intermittent failures)
 
 ```python
 class Anomaly(BaseModel):
@@ -227,10 +227,10 @@ class Anomaly(BaseModel):
 ```
 
 #### 5.3 Anomaly Reporting
-- [ ] Include anomalies in run records
-- [ ] API: `GET /orcaops/anomalies` - Recent anomalies
-- [ ] CLI: `orcaops anomalies` - List anomalies
-- [ ] MCP tool: `orcaops_check_anomalies`
+- [x] Include anomalies in run records
+- [x] API: `GET /orcaops/anomalies` - Recent anomalies
+- [x] CLI: `orcaops anomalies` - List anomalies
+- [x] MCP tool: `orcaops_check_anomalies`
 
 ### Deliverables
 - Baseline tracking system
@@ -249,24 +249,24 @@ class Anomaly(BaseModel):
 ### Tasks
 
 #### 6.1 Query Language
-- [ ] Implement filter syntax for runs
+- [x] Implement filter syntax for runs
   - `status:failed`
   - `image:python*`
   - `duration:>60`
   - `tag:ci`
   - `after:2024-01-01`
-- [ ] Support compound queries with AND/OR
-- [ ] Add full-text search on logs
+- [x] Support compound queries with AND/OR
+- [x] Add full-text search on logs
 
 #### 6.2 Query API
-- [ ] `GET /orcaops/runs?q=<query>` - Search runs
-- [ ] `GET /orcaops/runs/search` - Advanced search endpoint
-- [ ] Return facets (counts by status, image, etc.)
+- [x] `GET /orcaops/runs?q=<query>` - Search runs
+- [x] `GET /orcaops/runs/search` - Advanced search endpoint
+- [x] Return facets (counts by status, image, etc.)
 
 #### 6.3 CLI Search
-- [ ] `orcaops runs search "status:failed image:python*"`
-- [ ] Interactive search with filters
-- [ ] Export results to JSON/CSV
+- [x] `orcaops runs search "status:failed image:python*"`
+- [x] Interactive search with filters
+- [x] Export results to JSON/CSV
 
 ### Deliverables
 - Query parser
@@ -277,13 +277,13 @@ class Anomaly(BaseModel):
 
 ## Success Criteria
 
-- [ ] Every job captures resource usage
-- [ ] Logs are parsed and structured
-- [ ] Summaries are generated for all jobs
-- [ ] Metrics are queryable via API
-- [ ] Anomalies are detected and reported
-- [ ] Search works across all run history
-- [ ] AI agents can query job history via MCP
+- [x] Every job captures resource usage
+- [x] Logs are parsed and structured
+- [x] Summaries are generated for all jobs
+- [x] Metrics are queryable via API
+- [x] Anomalies are detected and reported
+- [x] Search works across all run history
+- [x] AI agents can query job history via MCP
 
 ---
 

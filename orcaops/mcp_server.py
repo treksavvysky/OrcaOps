@@ -120,6 +120,9 @@ def orcaops_run_job(
     artifacts: Optional[List[str]] = None,
     timeout: int = 300,
     job_id: Optional[str] = None,
+    intent: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    triggered_by: str = "mcp",
 ) -> str:
     """Run commands in a Docker container and wait for completion."""
     try:
@@ -132,6 +135,9 @@ def orcaops_run_job(
             commands=[JobCommand(command=cmd, timeout_seconds=timeout) for cmd in commands],
             artifacts=list(artifacts or []),
             ttl_seconds=timeout,
+            triggered_by=triggered_by,
+            intent=intent,
+            tags=list(tags or []),
         )
 
         jm.submit_job(spec)
@@ -187,6 +193,9 @@ def orcaops_submit_job(
     artifacts: Optional[List[str]] = None,
     timeout: int = 300,
     job_id: Optional[str] = None,
+    intent: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    triggered_by: str = "mcp",
 ) -> str:
     """Submit a job without waiting. Returns job_id for later polling."""
     try:
@@ -199,6 +208,9 @@ def orcaops_submit_job(
             commands=[JobCommand(command=cmd, timeout_seconds=timeout) for cmd in commands],
             artifacts=list(artifacts or []),
             ttl_seconds=timeout,
+            triggered_by=triggered_by,
+            intent=intent,
+            tags=list(tags or []),
         )
 
         record = jm.submit_job(spec)
@@ -850,22 +862,93 @@ def orcaops_cleanup_containers() -> str:
 
 
 # ===================================================================
+# Observability Tools
+# ===================================================================
+
+@server.tool(
+    name="orcaops_get_job_summary",
+    description=(
+        "Get a deterministic summary of a job execution including one-liner, "
+        "key events, errors, warnings, and suggestions."
+    ),
+)
+def orcaops_get_job_summary(job_id: str) -> str:
+    """Get a summary of a completed job."""
+    try:
+        jm = _job_manager()
+        record = jm.get_job(job_id)
+        if not record:
+            rs = _run_store()
+            record = rs.get_run(job_id)
+        if not record:
+            return _error(
+                "JOB_NOT_FOUND",
+                f"Job '{job_id}' not found.",
+                "Use orcaops_list_jobs or orcaops_list_runs to see available jobs.",
+            )
+
+        from orcaops.log_analyzer import SummaryGenerator
+        generator = SummaryGenerator()
+        summary = generator.generate(record)
+        return _success(**json.loads(summary.model_dump_json()))
+    except Exception as exc:
+        return _error("GET_SUMMARY_ERROR", str(exc))
+
+
+@server.tool(
+    name="orcaops_get_metrics",
+    description=(
+        "Get aggregate job metrics including success rates, durations, "
+        "and per-image breakdown. Optionally filter by date range."
+    ),
+)
+def orcaops_get_metrics(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+) -> str:
+    """Get aggregate job metrics."""
+    try:
+        from datetime import datetime
+        from orcaops.metrics import MetricsAggregator
+
+        rs = _run_store()
+        aggregator = MetricsAggregator(rs)
+
+        fd = datetime.fromisoformat(from_date) if from_date else None
+        td = datetime.fromisoformat(to_date) if to_date else None
+
+        metrics = aggregator.compute_metrics(from_date=fd, to_date=td)
+        return _success(**{k: v for k, v in metrics.items()})
+    except Exception as exc:
+        return _error("GET_METRICS_ERROR", str(exc))
+
+
+# ===================================================================
 # Run History Tools
 # ===================================================================
 
 @server.tool(
     name="orcaops_list_runs",
-    description="List historical job run records from disk.",
+    description="List historical job run records from disk with optional filters.",
 )
 def orcaops_list_runs(
     status: Optional[str] = None,
+    image: Optional[str] = None,
+    tags: Optional[List[str]] = None,
+    triggered_by: Optional[str] = None,
     limit: int = 50,
 ) -> str:
-    """List historical runs."""
+    """List historical runs with optional filtering."""
     try:
         rs = _run_store()
         status_filter = JobStatus(status) if status else None
-        records, total = rs.list_runs(status=status_filter, limit=limit)
+        records, total = rs.list_runs(
+            status=status_filter,
+            image=image,
+            tags=tags,
+            triggered_by=triggered_by,
+            limit=limit,
+        )
         return _success(
             runs=[
                 {
@@ -873,6 +956,8 @@ def orcaops_list_runs(
                     "status": r.status.value,
                     "image": r.image_ref,
                     "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "triggered_by": r.triggered_by,
+                    "tags": r.tags,
                 }
                 for r in records
             ],

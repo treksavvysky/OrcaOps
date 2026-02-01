@@ -77,6 +77,16 @@ class JobManager:
         # Long-running call — no locks held
         record = self.runner.run_sandbox_job(spec)
 
+        # Update baseline tracking
+        try:
+            from orcaops.metrics import BaselineTracker
+            tracker = BaselineTracker()
+            anomaly = tracker.update(record)
+            if anomaly:
+                record.anomalies.append(anomaly)
+        except Exception:
+            pass  # Baseline tracking is best-effort
+
         # Update entry, but respect cancellation
         with entry.lock:
             if entry.cancel_event.is_set():

@@ -58,7 +58,9 @@ def test_list_runs_with_status_filter(client):
     resp = test_client.get("/orcaops/runs?status=success&limit=10&offset=5")
     assert resp.status_code == 200
     store.list_runs.assert_called_once_with(
-        status=JobStatus.SUCCESS, limit=10, offset=5
+        status=JobStatus.SUCCESS, image=None, tags=None, triggered_by=None,
+        after=None, before=None, min_duration_seconds=None, max_duration_seconds=None,
+        limit=10, offset=5,
     )
 
 
