@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orcaops"
+dynamic = ["version"]
+description = "Safety-gated Docker operations layer for humans and AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+orca = "orcaops.cli:main"
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.hatch.version]
+path = "orcaops/__init__.py"
