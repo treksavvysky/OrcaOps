@@ -231,7 +231,7 @@ def test_guard_mismatch_refuses_and_runs_nothing(release, fake_docker):
     assert f"deployed (web): files={release / 'compose.atlas.yml'}" in msg
     assert f"env-file={release / 'release.env'}" in msg
     assert f"about to apply: files={release / 'docker-compose.yml'}  env-file=none" in msg
-    assert "--replace-deploy" in msg
+    assert "--ignore-deploy-mismatch" in msg
     assert _ran_up(fake_docker) == []
     assert not core.AUDIT_LOG.exists()
 
@@ -255,7 +255,7 @@ def test_guard_env_file_alone_is_a_mismatch(release, fake_docker):
 def test_guard_override_proceeds_and_is_audited(release, fake_docker, capsys):
     fake_docker.add("web", f"{release / 'compose.atlas.yml'}", f"{release / 'release.env'}")
     out = _up([str(release), "--replace-deploy", "--reason", "move to new layout"], capsys)
-    assert out[0].startswith("[guard] OVERRIDDEN (--replace-deploy)")
+    assert out[0].startswith("[guard] OVERRIDDEN (--ignore-deploy-mismatch)")
     assert len(_ran_up(fake_docker)) == 1
     entry = json.loads(core.AUDIT_LOG.read_text())
     assert entry["reason"] == "move to new layout"
@@ -277,6 +277,72 @@ def test_guard_reads_project_name_with_the_same_files(release, fake_docker, caps
     assert ps_call[-1] == "label=com.docker.compose.project=proj"
 
 
-def test_replace_deploy_flag_only_on_up():
+def test_replace_deploy_alias_only_on_up():
+    assert build_parser().parse_args(["up", ".", "--replace-deploy"]).ignore_deploy_mismatch
     with pytest.raises(SystemExit):
         build_parser().parse_args(["down", ".", "--replace-deploy"])
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["build", ".", "--ignore-deploy-mismatch"])
+
+
+def _down(argv, capsys):
+    args = build_parser().parse_args(["down", *argv])
+    args.func(args)
+    return capsys.readouterr().out.strip().splitlines()
+
+
+def _ran_down(fake):
+    return [c for c in fake.calls if c[-1] == "down"]
+
+
+def test_down_guard_no_containers_is_a_noop_pass(release, fake_docker, capsys):
+    out = _down([str(release), "--dry-run"], capsys)
+    assert out[0] == "[guard] project proj: no existing containers (nothing to take down)"
+    assert out[-1] == f"[dry-run] docker compose -f {release / 'docker-compose.yml'} down"
+
+
+def test_down_guard_match_allows_down(release, fake_docker, capsys):
+    fake_docker.add("web", f"{release / 'compose.atlas.yml'}", f"{release / 'release.env'}")
+    out = _down([str(release), "--file", "compose.atlas.yml", "--env-file", "release.env",
+                 "--reason", "planned stop"], capsys)
+    assert out[0] == "[guard] project proj: match — same files as the running deploy"
+    assert len(_ran_down(fake_docker)) == 1
+    assert "guard" not in json.loads(core.AUDIT_LOG.read_text())
+
+
+def test_down_guard_mismatch_refuses_and_runs_nothing(release, fake_docker, capsys):
+    fake_docker.add("web", f"{release / 'compose.atlas.yml'}", f"{release / 'release.env'}")
+    for extra in (["--reason", "oops"], ["--dry-run"]):
+        args = build_parser().parse_args(["down", str(release), *extra])
+        with pytest.raises(OrcaError) as exc:
+            args.func(args)
+        msg = str(exc.value)
+        assert f"deployed (web): files={release / 'compose.atlas.yml'}" in msg
+        assert f"about to apply: files={release / 'docker-compose.yml'}  env-file=none" in msg
+        assert "--ignore-deploy-mismatch" in msg
+    assert _ran_down(fake_docker) == []
+    assert "[dry-run]" not in capsys.readouterr().out
+    assert not core.AUDIT_LOG.exists()
+
+
+def test_down_guard_override_proceeds_and_is_audited(release, fake_docker, capsys):
+    fake_docker.add("web", f"{release / 'compose.atlas.yml'}", f"{release / 'release.env'}")
+    out = _down([str(release), "--ignore-deploy-mismatch", "--reason", "retire layout"], capsys)
+    assert out[0].startswith("[guard] OVERRIDDEN (--ignore-deploy-mismatch)")
+    assert len(_ran_down(fake_docker)) == 1
+    entry = json.loads(core.AUDIT_LOG.read_text())
+    assert entry["cmd"].endswith(" down")
+    assert entry["guard"] == {"overridden": True, "deployed": [{
+        "containers": ["web"],
+        "files": [str(release / "compose.atlas.yml")],
+        "env_file": [str(release / "release.env")],
+    }]}
+
+
+def test_build_is_not_guarded(release, fake_docker, capsys):
+    fake_docker.add("web", f"{release / 'compose.atlas.yml'}")
+    out = build_parser().parse_args(["build", str(release), "--dry-run"])
+    out.func(out)
+    assert capsys.readouterr().out.strip() == (
+        f"[dry-run] docker compose -f {release / 'docker-compose.yml'} build")
+    assert not any("config" in c for c in fake_docker.calls)

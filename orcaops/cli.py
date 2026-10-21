@@ -109,7 +109,8 @@ def cmd_build(args):
     _compose(args, "build")
 
 
-def cmd_up(args):
+def _guarded_compose(args, *compose_args, none_note):
+    """Run a compose command only if it targets the files the project was deployed from."""
     files, env_file = _compose_inputs(args)
     want = (_label_paths(",".join(map(str, files))),
             _label_paths(str(env_file) if env_file else ""))
@@ -117,7 +118,7 @@ def cmd_up(args):
     mismatched = {k: v for k, v in deployed.items() if k != want}
     audit_extra = None
     if not deployed:
-        print(f"[guard] project {name}: no existing containers (first deploy)")
+        print(f"[guard] project {name}: no existing containers ({none_note})")
     elif not mismatched:
         print(f"[guard] project {name}: match — same files as the running deploy")
     else:
@@ -126,21 +127,25 @@ def cmd_up(args):
             lines.append(f"  deployed ({', '.join(sorted(names))}): "
                          f"files={_fmt(dep_files)}  env-file={_fmt(dep_env)}")
         lines.append(f"  about to apply: files={_fmt(want[0])}  env-file={_fmt(want[1])}")
-        if not args.replace_deploy:
+        if not args.ignore_deploy_mismatch:
             lines.append("  pass the deployed files (--file/--env-file), or "
-                         "--replace-deploy if this change is intended")
+                         "--ignore-deploy-mismatch if this is intended")
             raise OrcaError("\n".join(lines))
-        print("[guard] OVERRIDDEN (--replace-deploy): " + "\n".join(lines))
+        print("[guard] OVERRIDDEN (--ignore-deploy-mismatch): " + "\n".join(lines))
         audit_extra = {"guard": {
             "overridden": True,
             "deployed": [{"containers": sorted(names), "files": sorted(f), "env_file": sorted(e)}
                          for (f, e), names in sorted(mismatched.items())],
         }}
-    _compose(args, "up", "-d", files=files, env_file=env_file, audit_extra=audit_extra)
+    _compose(args, *compose_args, files=files, env_file=env_file, audit_extra=audit_extra)
+
+
+def cmd_up(args):
+    _guarded_compose(args, "up", "-d", none_note="first deploy")
 
 
 def cmd_down(args):
-    _compose(args, "down")
+    _guarded_compose(args, "down", none_note="nothing to take down")
 
 
 def cmd_restart(args):
@@ -236,8 +241,10 @@ def build_parser():
         p.add_argument("--env-file", metavar="FILE",
                        help="env file passed to compose (relative to project)")
         _add_mutating_flags(p)
-        if name == "up":
-            p.add_argument("--replace-deploy", action="store_true",
+        if name in ("up", "down"):
+            # --replace-deploy is the original up-only spelling, kept as an alias.
+            flags = ["--ignore-deploy-mismatch"] + (["--replace-deploy"] if name == "up" else [])
+            p.add_argument(*flags, dest="ignore_deploy_mismatch", action="store_true",
                            help="proceed even though the running containers were deployed "
                                 "from different compose/env files (recorded in the audit log)")
         p.set_defaults(func=func)
