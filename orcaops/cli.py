@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .core import AUDIT_LOG, OrcaError, compose_file, docker
+from .core import AUDIT_LOG, OrcaError, compose_files, docker
 
 
 def cmd_status(args):
@@ -39,9 +39,10 @@ def cmd_logs(args):
 
 
 def _compose(args, *compose_args):
-    file = compose_file(Path(args.project).resolve())
+    files = compose_files(Path(args.project).resolve())
+    file_flags = [flag for f in files for flag in ("-f", str(f))]
     return docker(
-        "compose", "-f", str(file), *compose_args,
+        "compose", *file_flags, *compose_args,
         mutating=True, dry_run=args.dry_run, reason=args.reason,
     )
 

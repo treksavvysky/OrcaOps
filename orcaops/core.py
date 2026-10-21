@@ -10,6 +10,10 @@ from pathlib import Path
 AUDIT_LOG = Path(os.environ.get("ORCA_AUDIT_LOG", "~/.orcaops/audit.jsonl")).expanduser()
 
 COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
+# Compose's own default override discovery order. Passing `-f` disables that
+# discovery, so orca has to find the override itself.
+OVERRIDE_FILES = ("compose.override.yml", "compose.override.yaml",
+                  "docker-compose.override.yml", "docker-compose.override.yaml")
 
 
 class OrcaError(RuntimeError):
@@ -57,3 +61,14 @@ def compose_file(project: Path) -> Path:
         if candidate.is_file():
             return candidate
     raise OrcaError(f"no compose file found in {project}")
+
+
+def compose_files(project: Path) -> list[Path]:
+    """The base compose file plus the first override file next to it, if any."""
+    files = [compose_file(project)]
+    for name in OVERRIDE_FILES:
+        candidate = project / name
+        if candidate.is_file():
+            files.append(candidate)
+            break
+    return files

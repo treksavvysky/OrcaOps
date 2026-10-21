@@ -4,7 +4,7 @@ import pytest
 
 from orcaops import core
 from orcaops.cli import build_parser
-from orcaops.core import OrcaError, compose_file, docker
+from orcaops.core import OrcaError, compose_file, compose_files, docker
 
 COMMAND_SET = ["status", "ps", "logs", "build", "up", "down", "restart", "doctor", "prune"]
 
@@ -55,3 +55,29 @@ def test_prune_refuses_without_safe_flag():
     args = build_parser().parse_args(["prune"])
     with pytest.raises(OrcaError, match="--safe"):
         cmd_prune(args)
+
+
+def test_compose_files_without_override(tmp_path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    assert [f.name for f in compose_files(tmp_path)] == ["docker-compose.yml"]
+
+
+def test_compose_files_includes_override(tmp_path):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker-compose.override.yml").write_text("services: {}\n")
+    assert [f.name for f in compose_files(tmp_path)] == [
+        "docker-compose.yml", "docker-compose.override.yml"]
+
+
+@pytest.mark.parametrize("with_override", [False, True])
+def test_compose_dry_run_shows_every_file(tmp_path, capsys, with_override):
+    base = tmp_path / "docker-compose.yml"
+    base.write_text("services: {}\n")
+    expected = f"-f {base}"
+    if with_override:
+        override = tmp_path / "docker-compose.override.yml"
+        override.write_text("services: {}\n")
+        expected += f" -f {override}"
+    args = build_parser().parse_args(["up", str(tmp_path), "--dry-run"])
+    args.func(args)
+    assert capsys.readouterr().out.strip() == f"[dry-run] docker compose {expected} up -d"
