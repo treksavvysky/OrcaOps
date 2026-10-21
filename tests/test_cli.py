@@ -81,3 +81,67 @@ def test_compose_dry_run_shows_every_file(tmp_path, capsys, with_override):
     args = build_parser().parse_args(["up", str(tmp_path), "--dry-run"])
     args.func(args)
     assert capsys.readouterr().out.strip() == f"[dry-run] docker compose {expected} up -d"
+
+
+def _dry_run(argv, capsys):
+    args = build_parser().parse_args(argv)
+    args.func(args)
+    return capsys.readouterr().out.strip()
+
+
+def test_explicit_file_replaces_discovery(tmp_path, capsys):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "docker-compose.override.yml").write_text("services: {}\n")
+    (tmp_path / "compose.atlas.yml").write_text("services: {}\n")
+    out = _dry_run(["up", str(tmp_path), "--file", "compose.atlas.yml", "--dry-run"], capsys)
+    assert out == f"[dry-run] docker compose -f {tmp_path / 'compose.atlas.yml'} up -d"
+
+
+def test_explicit_files_are_repeatable_and_ordered(tmp_path, capsys):
+    for name in ("a.yml", "b.yml"):
+        (tmp_path / name).write_text("services: {}\n")
+    out = _dry_run(["build", str(tmp_path), "--file", "b.yml", "--file", "a.yml",
+                    "--dry-run"], capsys)
+    assert out == (f"[dry-run] docker compose -f {tmp_path / 'b.yml'} "
+                   f"-f {tmp_path / 'a.yml'} build")
+
+
+def test_env_file_is_passed_through(tmp_path, capsys):
+    (tmp_path / "compose.atlas.yml").write_text("services: {}\n")
+    (tmp_path / "release.env").write_text("X=1\n")
+    out = _dry_run(["down", str(tmp_path), "--file", "compose.atlas.yml",
+                    "--env-file", "release.env", "--dry-run"], capsys)
+    assert out == (f"[dry-run] docker compose -f {tmp_path / 'compose.atlas.yml'} "
+                   f"--env-file {tmp_path / 'release.env'} down")
+
+
+def test_env_file_works_with_discovery(tmp_path, capsys):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    (tmp_path / "prod.env").write_text("X=1\n")
+    out = _dry_run(["up", str(tmp_path), "--env-file", "prod.env", "--dry-run"], capsys)
+    assert out == (f"[dry-run] docker compose -f {tmp_path / 'docker-compose.yml'} "
+                   f"--env-file {tmp_path / 'prod.env'} up -d")
+
+
+@pytest.mark.parametrize("flag", ["--file", "--env-file"])
+def test_missing_explicit_file_is_refused(tmp_path, flag):
+    (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+    args = build_parser().parse_args(["up", str(tmp_path), flag, "nope.yml", "--dry-run"])
+    with pytest.raises(OrcaError, match="file not found"):
+        args.func(args)
+
+
+def test_explicit_file_command_is_audited(tmp_path, monkeypatch):
+    (tmp_path / "compose.atlas.yml").write_text("services: {}\n")
+    (tmp_path / "release.env").write_text("X=1\n")
+    log = tmp_path / "audit.jsonl"
+    monkeypatch.setattr(core, "AUDIT_LOG", log)
+    monkeypatch.setattr(core.subprocess, "run",
+                        lambda cmd, **kw: core.subprocess.CompletedProcess(cmd, 0))
+    args = build_parser().parse_args(["up", str(tmp_path), "--file", "compose.atlas.yml",
+                                      "--env-file", "release.env", "--reason", "release"])
+    args.func(args)
+    entry = json.loads(log.read_text())
+    assert entry["cmd"] == (f"docker compose -f {tmp_path / 'compose.atlas.yml'} "
+                            f"--env-file {tmp_path / 'release.env'} up -d")
+    assert entry["reason"] == "release"

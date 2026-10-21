@@ -38,11 +38,25 @@ def cmd_logs(args):
     docker("logs", *flags, args.service)
 
 
+def _project_path(project: Path, name: str) -> Path:
+    path = project / name  # an absolute name replaces project
+    if not path.is_file():
+        raise OrcaError(f"file not found: {path}")
+    return path
+
+
 def _compose(args, *compose_args):
-    files = compose_files(Path(args.project).resolve())
-    file_flags = [flag for f in files for flag in ("-f", str(f))]
+    project = Path(args.project).resolve()
+    if args.file:
+        # Explicit files replace discovery entirely, override included.
+        files = [_project_path(project, name) for name in args.file]
+    else:
+        files = compose_files(project)
+    flags = [flag for f in files for flag in ("-f", str(f))]
+    if args.env_file:
+        flags += ["--env-file", str(_project_path(project, args.env_file))]
     return docker(
-        "compose", *file_flags, *compose_args,
+        "compose", *flags, *compose_args,
         mutating=True, dry_run=args.dry_run, reason=args.reason,
     )
 
@@ -146,6 +160,11 @@ def build_parser():
         p = sub.add_parser(name, help=help_text)
         p.add_argument("project", nargs="?", default=".",
                        help="directory containing a compose file (default: cwd)")
+        p.add_argument("--file", action="append", metavar="FILE",
+                       help="compose file to use instead of discovery (repeatable; "
+                            "relative to project)")
+        p.add_argument("--env-file", metavar="FILE",
+                       help="env file passed to compose (relative to project)")
         _add_mutating_flags(p)
         p.set_defaults(func=func)
 

@@ -34,6 +34,11 @@ orca doctor                    is this host ready for orca?
 orca prune --safe              dangling images + build cache older than 7 days
 ```
 
+`build`, `up` and `down` use the project's compose file plus its
+`*.override.yml`, as Compose itself would. For release-style deploys, pass
+`--file compose.atlas.yml` (repeatable; replaces discovery, override included)
+and `--env-file release.env`. Both are relative to the project dir.
+
 ## Safety model
 
 - **Dry runs everywhere it matters.** Every mutating command accepts
