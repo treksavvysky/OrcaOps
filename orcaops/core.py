@@ -20,12 +20,12 @@ class OrcaError(RuntimeError):
     """A failure orca can explain to the user; printed without a traceback."""
 
 
-def docker(*args, mutating=False, dry_run=False, reason=None, capture=False):
+def docker(*args, mutating=False, dry_run=False, reason=None, capture=False, audit_extra=None):
     """Run a docker command.
 
     Mutating commands are appended to the audit log with their exit code and
-    the operator-supplied reason. A dry run prints the exact command and runs
-    nothing.
+    the operator-supplied reason, plus any `audit_extra` fields. A dry run
+    prints the exact command and runs nothing.
     """
     cmd = ["docker", *args]
     if dry_run:
@@ -36,20 +36,21 @@ def docker(*args, mutating=False, dry_run=False, reason=None, capture=False):
     except FileNotFoundError:
         raise OrcaError("docker binary not found on PATH") from None
     if mutating:
-        _audit(cmd, proc.returncode, reason)
+        _audit(cmd, proc.returncode, reason, audit_extra)
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip() if capture else f"exit code {proc.returncode}"
         raise OrcaError(f"`{shlex.join(cmd)}` failed: {detail}")
     return proc
 
 
-def _audit(cmd, exit_code, reason):
+def _audit(cmd, exit_code, reason, extra=None):
     AUDIT_LOG.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
         "cmd": shlex.join(cmd),
         "exit": exit_code,
         "reason": reason,
+        **(extra or {}),
     }
     with AUDIT_LOG.open("a") as f:
         f.write(json.dumps(entry) + "\n")

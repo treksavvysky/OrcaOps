@@ -39,6 +39,13 @@ orca prune --safe              dangling images + build cache older than 7 days
 `--file compose.atlas.yml` (repeatable; replaces discovery, override included)
 and `--env-file release.env`. Both are relative to the project dir.
 
+`up` checks what the project's existing containers were deployed from
+(Compose's `config_files` / `environment_file` labels). If that differs from
+the files about to be applied, it refuses, dry runs included, and names both
+sides. Pass the deployed files, or `--replace-deploy` when the change is
+intended; the override and the previously deployed files go into the audit
+entry.
+
 ## Safety model
 
 - **Dry runs everywhere it matters.** Every mutating command accepts

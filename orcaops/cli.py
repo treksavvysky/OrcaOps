@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -45,20 +46,63 @@ def _project_path(project: Path, name: str) -> Path:
     return path
 
 
-def _compose(args, *compose_args):
+def _compose_inputs(args):
+    """The compose files and env file (or None) this invocation will apply."""
     project = Path(args.project).resolve()
     if args.file:
         # Explicit files replace discovery entirely, override included.
         files = [_project_path(project, name) for name in args.file]
     else:
         files = compose_files(project)
+    env_file = _project_path(project, args.env_file) if args.env_file else None
+    return files, env_file
+
+
+def _compose_flags(files, env_file):
     flags = [flag for f in files for flag in ("-f", str(f))]
-    if args.env_file:
-        flags += ["--env-file", str(_project_path(project, args.env_file))]
+    if env_file:
+        flags += ["--env-file", str(env_file)]
+    return flags
+
+
+def _compose(args, *compose_args, files=None, env_file=None, audit_extra=None):
+    if files is None:
+        files, env_file = _compose_inputs(args)
     return docker(
-        "compose", *flags, *compose_args,
-        mutating=True, dry_run=args.dry_run, reason=args.reason,
+        "compose", *_compose_flags(files, env_file), *compose_args,
+        mutating=True, dry_run=args.dry_run, reason=args.reason, audit_extra=audit_extra,
     )
+
+
+def _label_paths(value):
+    # Compose stores these labels as comma-joined absolute paths; "" means none.
+    return frozenset(os.path.realpath(p) for p in (value or "").split(",") if p)
+
+
+def _deployed_inputs(files, env_file):
+    """What the project's existing containers were created from.
+
+    Returns {(config_files, env_files): [container names]}; empty when the
+    project has no containers yet. Compose records only an explicit
+    --env-file in the label, never the default .env, so the two compare 1:1.
+    """
+    flags = _compose_flags(files, env_file)
+    config = json.loads(docker("compose", *flags, "config", "--format", "json",
+                               capture=True).stdout)
+    label = f"label=com.docker.compose.project={config['name']}"
+    ids = docker("ps", "-aq", "--filter", label, capture=True).stdout.split()
+    deployed = {}
+    if ids:
+        for c in json.loads(docker("inspect", *ids, capture=True).stdout):
+            labels = c["Config"]["Labels"] or {}
+            key = (_label_paths(labels.get("com.docker.compose.project.config_files")),
+                   _label_paths(labels.get("com.docker.compose.project.environment_file")))
+            deployed.setdefault(key, []).append(c["Name"].lstrip("/"))
+    return config["name"], deployed
+
+
+def _fmt(paths):
+    return ", ".join(sorted(paths)) or "none"
 
 
 def cmd_build(args):
@@ -66,7 +110,33 @@ def cmd_build(args):
 
 
 def cmd_up(args):
-    _compose(args, "up", "-d")
+    files, env_file = _compose_inputs(args)
+    want = (_label_paths(",".join(map(str, files))),
+            _label_paths(str(env_file) if env_file else ""))
+    name, deployed = _deployed_inputs(files, env_file)
+    mismatched = {k: v for k, v in deployed.items() if k != want}
+    audit_extra = None
+    if not deployed:
+        print(f"[guard] project {name}: no existing containers (first deploy)")
+    elif not mismatched:
+        print(f"[guard] project {name}: match — same files as the running deploy")
+    else:
+        lines = [f"project {name} was deployed from different files:"]
+        for (dep_files, dep_env), names in sorted(mismatched.items()):
+            lines.append(f"  deployed ({', '.join(sorted(names))}): "
+                         f"files={_fmt(dep_files)}  env-file={_fmt(dep_env)}")
+        lines.append(f"  about to apply: files={_fmt(want[0])}  env-file={_fmt(want[1])}")
+        if not args.replace_deploy:
+            lines.append("  pass the deployed files (--file/--env-file), or "
+                         "--replace-deploy if this change is intended")
+            raise OrcaError("\n".join(lines))
+        print("[guard] OVERRIDDEN (--replace-deploy): " + "\n".join(lines))
+        audit_extra = {"guard": {
+            "overridden": True,
+            "deployed": [{"containers": sorted(names), "files": sorted(f), "env_file": sorted(e)}
+                         for (f, e), names in sorted(mismatched.items())],
+        }}
+    _compose(args, "up", "-d", files=files, env_file=env_file, audit_extra=audit_extra)
 
 
 def cmd_down(args):
@@ -166,6 +236,10 @@ def build_parser():
         p.add_argument("--env-file", metavar="FILE",
                        help="env file passed to compose (relative to project)")
         _add_mutating_flags(p)
+        if name == "up":
+            p.add_argument("--replace-deploy", action="store_true",
+                           help="proceed even though the running containers were deployed "
+                                "from different compose/env files (recorded in the audit log)")
         p.set_defaults(func=func)
 
     p = sub.add_parser("restart", help="restart a container")
